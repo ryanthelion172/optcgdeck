@@ -4,6 +4,7 @@ import { fetchCards } from './lib/api'
 import { changeCount, deckSize, matchesLeader, newDeck, validateDeck, DECK_SIZE } from './lib/deck'
 import { emptyFilters, type Filters } from './lib/search'
 import { loadCurrentId, loadDecks, saveCurrentId, saveDecks } from './lib/storage'
+import { applyTheme, initialTheme, type Theme } from './lib/theme'
 import { CardBrowser } from './components/CardBrowser'
 import { DeckPanel } from './components/DeckPanel'
 import { CardDetail } from './components/CardDetail'
@@ -30,6 +31,9 @@ export default function App() {
   const [selected, setSelected] = useState<Card | null>(null)
   const [showList, setShowList] = useState(false)
   const [tab, setTab] = useState<'cards' | 'deck'>('cards')
+  const [theme, setTheme] = useState<Theme>(initialTheme)
+
+  useEffect(() => applyTheme(theme), [theme])
 
   useEffect(() => {
     fetchCards().then(setCards, (e: Error) => setError(e.message))
@@ -110,6 +114,14 @@ export default function App() {
           </Button>
           <Button variant="danger" onClick={deleteDeck} title="Delete deck">Delete</Button>
         </div>
+        <button
+          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          className="ml-auto flex h-9 w-9 items-center justify-center rounded-lg bg-slate-800 text-lg hover:bg-slate-700"
+        >
+          {theme === 'dark' ? '☀️' : '🌙'}
+        </button>
       </header>
 
       {error ? (

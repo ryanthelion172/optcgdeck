@@ -88,7 +88,7 @@ export function CardBrowser({ cards, sets, filters, setFilters, leader, counts, 
                   <CardImage card={card} />
                 </button>
                 {count > 0 && (
-                  <span className="absolute left-1 top-1 rounded-md bg-black/80 px-1.5 text-sm font-bold">
+                  <span className="absolute left-1 top-1 rounded-md bg-black/80 px-1.5 text-sm font-bold text-white">
                     {isLeaderCard ? 'L' : `${count}`}
                   </span>
                 )}
@@ -96,7 +96,7 @@ export function CardBrowser({ cards, sets, filters, setFilters, leader, counts, 
                   onClick={() => onAdd(card)}
                   disabled={full}
                   aria-label={isLeaderCard ? `Use ${card.name} as Leader` : `Add ${card.name}`}
-                  className="absolute bottom-1 right-1 flex h-9 w-9 items-center justify-center rounded-full bg-red-600 text-xl font-bold shadow-lg hover:bg-red-500 disabled:bg-slate-700"
+                  className="absolute bottom-1 right-1 flex h-9 w-9 items-center justify-center rounded-full bg-red-600 text-xl font-bold text-white shadow-lg hover:bg-red-500 disabled:bg-slate-700"
                 >
                   {isLeaderCard ? '★' : '+'}
                 </button>
