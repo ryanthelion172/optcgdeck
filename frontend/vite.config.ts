@@ -28,7 +28,7 @@ export default defineConfig({
             options: { cacheName: 'card-data' },
           },
           {
-            urlPattern: /^https:\/\/en\.onepiece-cardgame\.com\//,
+            urlPattern: /\/api\/cards\/[^/]+\/image$/,
             handler: 'CacheFirst',
             options: {
               cacheName: 'card-images',

@@ -52,8 +52,10 @@ cd backend && python scripts/import_cards.py
 ```
 
 Card data comes from the [Punk Records](https://github.com/buhbbl/punk-records) dataset, which is
-generated from the official One Piece Card Game card list. Card images load from the official
-site. One Piece Card Game card text and images are © Eiichiro Oda/Shueisha, Toei Animation and
+generated from the official One Piece Card Game card list. Card images are downloaded by the
+backend the first time they're shown (official site first, Limitless TCG as a backup) and saved in
+`backend/.image-cache/`. Only base arts are downloaded for now. If an image won't load, the backend
+terminal shows why. One Piece Card Game card text and images are © Eiichiro Oda/Shueisha, Toei Animation and
 Bandai. This is an unofficial fan project.
 
 ## Deck rules checked

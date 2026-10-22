@@ -1,9 +1,11 @@
 import json
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from .cards import CardStore, get_store
+from .images import MEDIA_TYPES, fetch_image
 
 app = FastAPI(title="OPTCG Deck Builder API")
 
@@ -37,6 +39,21 @@ def get_card(card_id: str, store: CardStore = Depends(get_store)) -> dict:
     if card is None:
         raise HTTPException(status_code=404, detail="Card not found")
     return card
+
+
+@app.get("/api/cards/{card_id}/image")
+async def card_image(card_id: str, store: CardStore = Depends(get_store)):
+    card = store.get(card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Card not found")
+    path = await fetch_image(card)
+    if path is None:
+        raise HTTPException(status_code=502, detail="Could not download the card image")
+    return FileResponse(
+        path,
+        media_type=MEDIA_TYPES[path.suffix],
+        headers={"Cache-Control": "public, max-age=2592000"},
+    )
 
 
 _json_cache: dict[str, bytes] = {}
