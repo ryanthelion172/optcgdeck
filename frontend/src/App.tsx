@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Card, Deck } from './types'
 import { fetchCards } from './lib/api'
 import { changeCount, deckSize, matchesLeader, newDeck, validateDeck, DECK_SIZE } from './lib/deck'
-import { buildIndex, emptyFilters, type Filters } from './lib/search'
+import { emptyFilters, type Filters } from './lib/search'
 import { loadCurrentId, loadDecks, saveCurrentId, saveDecks } from './lib/storage'
 import { CardBrowser } from './components/CardBrowser'
 import { DeckPanel } from './components/DeckPanel'
@@ -16,6 +16,10 @@ function initialDecks(): { decks: Deck[]; currentId: string } {
   const saved = loadCurrentId()
   const currentId = decks.some((d) => d.id === saved) ? saved! : decks[0].id
   return { decks, currentId }
+}
+
+function filtersFor(leader: Card | undefined): Filters {
+  return { ...emptyFilters, colors: leader ? [...leader.colors] : [] }
 }
 
 export default function App() {
@@ -38,7 +42,6 @@ export default function App() {
 
   const byId = useMemo(() => new Map((cards ?? []).map((c) => [c.id, c])), [cards])
   const lookup = useCallback((id: string) => byId.get(id), [byId])
-  const index = useMemo(() => buildIndex(cards ?? []), [cards])
   const sets = useMemo(() => [...new Set((cards ?? []).map((c) => c.set))].sort(), [cards])
 
   const deck = decks.find((d) => d.id === currentId)!
@@ -52,7 +55,6 @@ export default function App() {
   const createDeck = () => {
     const d = newDeck(`Deck ${decks.length + 1}`)
     setState({ decks: [...decks, d], currentId: d.id })
-    setFilters(emptyFilters)
   }
   const renameDeck = () => {
     const name = prompt('Deck name', deck.name)?.trim()
@@ -65,14 +67,20 @@ export default function App() {
     setState({ decks: rest, currentId: rest[0].id })
   }
   const pickLeader = () => {
-    setFilters({ ...emptyFilters, category: 'Leader' })
+    setFilters({ ...emptyFilters, leaders: true })
     setTab('cards')
   }
   const addFromBrowser = (card: Card) => {
     change(card, 1)
-    // After choosing a Leader, switch the browser to cards that fit it.
-    if (card.category === 'Leader' && filters.category === 'Leader') setFilters({ ...filters, category: '' })
+    // After choosing a Leader, show cards in its colors.
+    if (card.category === 'Leader') setFilters(filtersFor(card))
   }
+
+  // When the deck (or card data) changes, start from the Leader's colors.
+  const leaderId = deck.leaderId
+  useEffect(() => {
+    setFilters(filtersFor(leaderId ? byId.get(leaderId) : undefined))
+  }, [currentId, byId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const size = deckSize(deck)
 
@@ -115,7 +123,6 @@ export default function App() {
           <div className={`min-h-0 ${tab === 'cards' ? 'flex' : 'hidden'} flex-col lg:flex`}>
             <CardBrowser
               cards={cards}
-              index={index}
               sets={sets}
               filters={filters}
               setFilters={setFilters}

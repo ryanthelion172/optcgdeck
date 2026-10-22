@@ -3,6 +3,14 @@ import type { Card, Deck } from '../types'
 export const DECK_SIZE = 50
 export const MAX_COPIES = 4
 
+/** Cards whose text lets you run any number of copies. */
+export const UNLIMITED_CARDS = new Set(['OP08-072', 'OP16-042'])
+
+/** How many copies of a card a deck may hold. */
+export function maxCopies(cardId: string): number {
+  return UNLIMITED_CARDS.has(cardId) ? Infinity : MAX_COPIES
+}
+
 export type CardLookup = (id: string) => Card | undefined
 
 export function newDeck(name = 'New deck'): Deck {
@@ -31,7 +39,7 @@ export function changeCount(deck: Deck, card: Card, delta: number): Deck {
     return { ...deck, leaderId: delta > 0 ? card.id : null, updatedAt: Date.now() }
   }
   const current = deck.cards[card.id] ?? 0
-  const next = Math.max(0, Math.min(MAX_COPIES, current + delta))
+  const next = Math.max(0, Math.min(maxCopies(card.id), current + delta))
   const cards = { ...deck.cards }
   if (next === 0) delete cards[card.id]
   else cards[card.id] = next
@@ -69,7 +77,7 @@ export function validateDeck(deck: Deck, lookup: CardLookup): Problem[] {
       problems.push({ level: 'error', message: `Unknown card ${id}.` })
       continue
     }
-    if (count > MAX_COPIES) {
+    if (count > maxCopies(id)) {
       problems.push({ level: 'error', message: `${card.name} (${id}): max ${MAX_COPIES} copies.` })
     }
     if (card.category === 'Leader') {

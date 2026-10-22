@@ -8,6 +8,7 @@ Run from the backend folder:  python scripts/import_cards.py
 
 from __future__ import annotations
 
+import html
 import json
 import sys
 import urllib.request
@@ -23,7 +24,17 @@ def fetch_json(url: str):
         return json.load(resp)
 
 
+def clean(value):
+    """The source text keeps HTML escapes like "&amp;"; turn them back into characters."""
+    if isinstance(value, str):
+        return html.unescape(value)
+    if isinstance(value, list):
+        return [clean(v) for v in value]
+    return value
+
+
 def to_card(raw: dict, set_label: str | None) -> dict:
+    raw = {k: clean(v) for k, v in raw.items()}
     category = raw["category"]
     is_leader = category == "Leader"
     return {

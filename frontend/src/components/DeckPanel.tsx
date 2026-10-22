@@ -1,5 +1,5 @@
 import type { Card, Deck } from '../types'
-import { costCurve, countByCategory, DECK_SIZE, deckSize, MAX_COPIES, type CardLookup, type Problem } from '../lib/deck'
+import { costCurve, countByCategory, DECK_SIZE, deckSize, maxCopies, type CardLookup, type Problem } from '../lib/deck'
 import { CardImage } from './CardImage'
 import { ColorDots } from './ui'
 
@@ -34,16 +34,21 @@ export function DeckPanel({ deck, lookup, problems, onChange, onOpen, onPickLead
     <section className="flex min-h-0 flex-col">
       <div className="space-y-3 border-b border-slate-800 p-3">
         {leader ? (
-          <button onClick={() => onOpen(leader)} className="flex w-full items-center gap-3 rounded-xl bg-slate-900 p-2 text-left">
-            <CardImage card={leader} className="!w-14 shrink-0" />
-            <div className="min-w-0">
-              <p className="text-xs uppercase tracking-wide text-slate-400">Leader</p>
-              <p className="truncate font-semibold">{leader.name}</p>
-              <p className="flex items-center gap-2 text-xs text-slate-400">
-                <ColorDots colors={leader.colors} /> {leader.id} · Life {leader.life} · {leader.power}
-              </p>
-            </div>
-          </button>
+          <div className="flex items-center gap-2 rounded-xl bg-slate-900 p-2">
+            <button onClick={() => onOpen(leader)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+              <CardImage card={leader} className="!w-14 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-xs uppercase tracking-wide text-slate-400">Leader</p>
+                <p className="truncate font-semibold">{leader.name}</p>
+                <p className="flex items-center gap-2 text-xs text-slate-400">
+                  <ColorDots colors={leader.colors} /> {leader.id} · Life {leader.life} · {leader.power}
+                </p>
+              </div>
+            </button>
+            <button onClick={onPickLeader} className="shrink-0 rounded-lg px-2 py-1 text-sm text-slate-300 hover:bg-slate-800">
+              Change
+            </button>
+          </div>
         ) : (
           <button
             onClick={onPickLeader}
@@ -115,7 +120,7 @@ export function DeckPanel({ deck, lookup, problems, onChange, onOpen, onPickLead
                 <button
                   aria-label={`Add one ${card.name}`}
                   onClick={() => onChange(card, 1)}
-                  disabled={count >= MAX_COPIES}
+                  disabled={count >= maxCopies(id)}
                   className="h-8 w-8 rounded-full bg-slate-800 text-lg hover:bg-slate-700 disabled:opacity-40"
                 >
                   +

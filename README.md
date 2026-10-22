@@ -2,7 +2,7 @@
 
 A web deck builder for the One Piece Card Game that works on phones and desktop.
 
-**Now:** search every English card, pick a Leader, build a 50-card deck with live rule checks
+**Now:** browse every English card by set and color, pick a Leader, build a 50-card deck with live rule checks
 and a cost curve, import/export decklists (`4xOP01-016` format), and keep several decks saved
 on your device. It can be installed to your home screen as an app.
 
@@ -62,7 +62,7 @@ Bandai. This is an unofficial fan project.
 
 - Exactly 1 Leader
 - Exactly 50 cards in the main deck
-- At most 4 copies of any card number
+- At most 4 copies of any card number (OP08-072 and OP16-042 allow any number)
 - Every card shares at least one color with the Leader
 
-Card-specific deck-building exceptions and the banned list are not checked yet.
+Other card-specific deck-building exceptions and the banned list are not checked yet.

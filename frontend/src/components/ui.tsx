@@ -16,21 +16,28 @@ export function Modal({
   title,
   onClose,
   children,
+  large = false,
 }: {
   title: string
   onClose: () => void
   children: ReactNode
+  /** Fill 75% of the screen's width and height. */
+  large?: boolean
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center"
+      className={`fixed inset-0 z-50 flex justify-center bg-black/70 sm:items-center ${large ? 'items-center' : 'items-end'}`}
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-label={title}
     >
       <div
-        className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-slate-900 p-4 shadow-xl sm:max-w-lg sm:rounded-2xl"
+        className={
+          large
+            ? 'flex h-[75vh] w-[75vw] flex-col overflow-y-auto rounded-2xl bg-slate-900 p-4 shadow-xl sm:overflow-hidden'
+            : 'max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-slate-900 p-4 shadow-xl sm:max-w-lg sm:rounded-2xl'
+        }
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between gap-2">

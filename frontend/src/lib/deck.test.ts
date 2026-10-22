@@ -30,6 +30,7 @@ const leader = card('OP01-001', { category: 'Leader', colors: ['Red', 'Green'], 
 const db: Record<string, Card> = { [leader.id]: leader }
 for (let i = 10; i < 30; i++) db[`OP01-0${i}`] = card(`OP01-0${i}`, { cost: i % 8 })
 db['OP02-050'] = card('OP02-050', { colors: ['Blue'] })
+db['OP08-072'] = card('OP08-072', { colors: ['Red'] })
 const lookup = (id: string) => db[id]
 
 function legalDeck(): Deck {
@@ -69,6 +70,17 @@ describe('changeCount', () => {
     expect(deck.cards['OP01-010']).toBe(4)
     deck = changeCount(deck, db['OP01-010'], -4)
     expect(deck.cards['OP01-010']).toBeUndefined()
+  })
+
+  it('allows unlimited copies of OP08-072 and OP16-042', () => {
+    let deck = legalDeck()
+    for (let i = 0; i < 10; i++) deck = changeCount(deck, db['OP08-072'], 1)
+    expect(deck.cards['OP08-072']).toBe(10)
+    delete deck.cards['OP01-010']
+    delete deck.cards['OP01-022']
+    // 11 x 4 = 44, plus 6 Biscuit Warriors = 50
+    deck.cards['OP08-072'] = 6
+    expect(validateDeck(deck, lookup)).toEqual([])
   })
 
   it('sets the Leader instead of adding it to the deck', () => {
