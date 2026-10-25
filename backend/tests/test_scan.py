@@ -97,3 +97,10 @@ def test_scan_without_api_key(monkeypatch):
     resp = TestClient(app).post("/api/scan", files={"photo": ("deck.jpg", b"img", "image/jpeg")})
     assert resp.status_code == 503
     assert "CARDSIGHTAI_API_KEY" in resp.json()["detail"]
+
+
+def test_scan_endpoint_includes_raw_detections(monkeypatch):
+    raw = [det(name="Mystery", number="999")]
+    monkeypatch.setattr(main, "identify", lambda *a: raw)
+    resp = TestClient(app).post("/api/scan", files={"photo": ("deck.jpg", b"img", "image/jpeg")})
+    assert resp.json()["raw"] == raw

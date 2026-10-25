@@ -77,7 +77,10 @@ def scan_photo(photo: UploadFile = File(...), store: CardStore = Depends(get_sto
         detections = identify(image, photo.filename or "photo.jpg", photo.content_type)
     except ScanError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
-    return build_result(detections, store)
+    result = build_result(detections, store)
+    # Debugging aid: include CardSight's raw detections so the browser can log them.
+    result["raw"] = detections
+    return result
 
 
 _json_cache: dict[str, bytes] = {}

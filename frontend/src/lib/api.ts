@@ -17,6 +17,8 @@ export interface ScanResult {
   detected: number
   cards: { id: string; count: number; confidence: 'High' | 'Medium' | 'Low' }[]
   unmatched: { label: string; confidence: string }[]
+  /** CardSight's raw detections, for debugging. */
+  raw?: unknown[]
 }
 
 /** Sends a photo to the backend, which identifies the cards with CardSight (one API call). */
@@ -28,5 +30,9 @@ export async function scanPhoto(photo: File): Promise<ScanResult> {
     const detail = await resp.json().then((d) => d.detail as string, () => '')
     throw new Error(detail || `Scan failed (${resp.status})`)
   }
-  return resp.json()
+  const result: ScanResult = await resp.json()
+  // Debugging aid: open the browser console (F12) to see what CardSight returned.
+  console.log('CardSight raw detections:', result.raw)
+  console.log('Matched result:', { detected: result.detected, cards: result.cards, unmatched: result.unmatched })
+  return result
 }
