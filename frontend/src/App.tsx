@@ -9,6 +9,7 @@ import { CardBrowser } from './components/CardBrowser'
 import { DeckPanel } from './components/DeckPanel'
 import { CardDetail } from './components/CardDetail'
 import { DecklistModal } from './components/DecklistModal'
+import { ScanModal } from './components/ScanModal'
 import { Button } from './components/ui'
 
 function initialDecks(): { decks: Deck[]; currentId: string } {
@@ -30,6 +31,7 @@ export default function App() {
   const [filters, setFilters] = useState<Filters>(emptyFilters)
   const [selected, setSelected] = useState<Card | null>(null)
   const [showList, setShowList] = useState(false)
+  const [showScan, setShowScan] = useState(false)
   const [tab, setTab] = useState<'cards' | 'deck'>('cards')
   const [theme, setTheme] = useState<Theme>(initialTheme)
 
@@ -59,6 +61,16 @@ export default function App() {
   const createDeck = () => {
     const d = newDeck(`Deck ${decks.length + 1}`)
     setState({ decks: [...decks, d], currentId: d.id })
+  }
+  const createFromScan = (leaderId: string | null, scanned: Record<string, number>) => {
+    const d = {
+      ...newDeck(`Scanned deck ${new Date().toLocaleDateString()}`),
+      leaderId,
+      cards: scanned,
+    }
+    setState({ decks: [...decks, d], currentId: d.id })
+    setShowScan(false)
+    setTab('deck')
   }
   const renameDeck = () => {
     const name = prompt('Deck name', deck.name)?.trim()
@@ -106,22 +118,25 @@ export default function App() {
             </option>
           ))}
         </select>
-        <div className="flex gap-1.5">
+        <button
+          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          className="ml-auto flex h-9 w-9 items-center sm:order-last justify-center rounded-lg bg-slate-800 text-lg hover:bg-slate-700"
+        >
+          {theme === 'dark' ? '☀️' : '🌙'}
+        </button>
+        <div className="flex flex-wrap gap-1.5">
           <Button onClick={createDeck} title="New deck">New</Button>
           <Button onClick={renameDeck} title="Rename deck">Rename</Button>
           <Button onClick={() => setShowList(true)} title="Import or export a decklist" disabled={!cards}>
             Decklist
           </Button>
           <Button variant="danger" onClick={deleteDeck} title="Delete deck">Delete</Button>
+          <Button variant="primary" onClick={() => setShowScan(true)} disabled={!cards}>
+            Create deck from photo
+          </Button>
         </div>
-        <button
-          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          className="ml-auto flex h-9 w-9 items-center justify-center rounded-lg bg-slate-800 text-lg hover:bg-slate-700"
-        >
-          {theme === 'dark' ? '☀️' : '🌙'}
-        </button>
       </header>
 
       {error ? (
@@ -178,6 +193,9 @@ export default function App() {
           onChange={(delta) => change(selected, delta)}
           onClose={() => setSelected(null)}
         />
+      )}
+      {showScan && cards && (
+        <ScanModal lookup={lookup} onCreate={createFromScan} onClose={() => setShowScan(false)} />
       )}
       {showList && cards && (
         <DecklistModal

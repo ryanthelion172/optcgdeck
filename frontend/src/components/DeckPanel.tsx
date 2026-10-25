@@ -36,7 +36,7 @@ export function DeckPanel({ deck, lookup, problems, onChange, onOpen, onPickLead
         {leader ? (
           <div className="flex items-center gap-2 rounded-xl bg-slate-900 p-2">
             <button onClick={() => onOpen(leader)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-              <CardImage card={leader} className="!w-14 shrink-0" />
+              <CardImage card={leader} className="!w-14 shrink-0" showText={false} />
               <div className="min-w-0">
                 <p className="text-xs uppercase tracking-wide text-slate-400">Leader</p>
                 <p className="truncate font-semibold">{leader.name}</p>

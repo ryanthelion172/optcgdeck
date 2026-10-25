@@ -6,7 +6,9 @@ A web deck builder for the One Piece Card Game that works on phones and desktop.
 and a cost curve, import/export decklists (`4xOP01-016` format), and keep several decks saved
 on your device. It can be installed to your home screen as an app.
 
-**Next:** take a photo of a deck and turn it into an editable decklist.
+**Create deck from photo:** take or upload a photo of your cards, check what was recognised,
+fix any counts, and turn it into a deck. Scanning uses the [CardSight AI](https://cardsight.ai)
+API (one API call per photo).
 
 ## Project layout
 
@@ -27,6 +29,7 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
+cp .env.example .env               # then add your CardSight API key to .env
 uvicorn app.main:app --reload
 
 # Frontend (http://localhost:5173), in a second terminal
@@ -37,6 +40,9 @@ npm run dev
 
 The frontend forwards `/api` requests to the backend during development. To try it on your
 phone, run `npm run dev -- --host` and open the address it prints from a phone on the same Wi-Fi.
+
+`backend/.env` holds your `CARDSIGHTAI_API_KEY`. Git ignores it, so it never goes to GitHub.
+Everything except photo scanning works without a key.
 
 ## Tests
 

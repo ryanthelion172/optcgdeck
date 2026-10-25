@@ -12,3 +12,21 @@ export async function fetchCards(): Promise<Card[]> {
   if (!resp.ok) throw new Error(`Could not load cards (${resp.status})`)
   return resp.json()
 }
+
+export interface ScanResult {
+  detected: number
+  cards: { id: string; count: number; confidence: 'High' | 'Medium' | 'Low' }[]
+  unmatched: { label: string; confidence: string }[]
+}
+
+/** Sends a photo to the backend, which identifies the cards with CardSight (one API call). */
+export async function scanPhoto(photo: File): Promise<ScanResult> {
+  const body = new FormData()
+  body.append('photo', photo)
+  const resp = await fetch(`${API_BASE}/api/scan`, { method: 'POST', body })
+  if (!resp.ok) {
+    const detail = await resp.json().then((d) => d.detail as string, () => '')
+    throw new Error(detail || `Scan failed (${resp.status})`)
+  }
+  return resp.json()
+}

@@ -1,11 +1,17 @@
 import json
+from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from .cards import CardStore, get_store
 from .images import MEDIA_TYPES, fetch_image
+from .scan import ScanError, build_result, identify
+
+# Secrets such as CARDSIGHTAI_API_KEY live in backend/.env, which git ignores.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 app = FastAPI(title="OPTCG Deck Builder API")
 
@@ -54,6 +60,24 @@ async def card_image(card_id: str, store: CardStore = Depends(get_store)):
         media_type=MEDIA_TYPES[path.suffix],
         headers={"Cache-Control": "public, max-age=2592000"},
     )
+
+
+MAX_PHOTO_BYTES = 15 * 1024 * 1024
+
+
+@app.post("/api/scan")
+def scan_photo(photo: UploadFile = File(...), store: CardStore = Depends(get_store)) -> dict:
+    """Identifies the cards in a photo. Uses one CardSight API call."""
+    if not (photo.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=400, detail="Please upload a photo.")
+    image = photo.file.read(MAX_PHOTO_BYTES + 1)
+    if len(image) > MAX_PHOTO_BYTES:
+        raise HTTPException(status_code=413, detail="That photo is too large (15 MB max).")
+    try:
+        detections = identify(image, photo.filename or "photo.jpg", photo.content_type)
+    except ScanError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+    return build_result(detections, store)
 
 
 _json_cache: dict[str, bytes] = {}
