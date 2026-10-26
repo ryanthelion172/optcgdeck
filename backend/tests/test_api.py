@@ -28,3 +28,10 @@ def test_get_card_case_insensitive():
 
 def test_unknown_card_404():
     assert client.get("/api/cards/XX99-999").status_code == 404
+
+
+def test_decks_need_a_database(monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    resp = client.get("/api/decks", headers={"X-Owner-Key": "k" * 40})
+    assert resp.status_code == 503
+    assert "DATABASE_URL" in resp.json()["detail"]

@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from .cards import CardStore, get_store
+from .decks import router as decks_router
 from .images import MEDIA_TYPES, close_client, fetch_image
 from .scan import ScanError, build_result, identify
 
@@ -28,9 +29,12 @@ app = FastAPI(title="OPTCG Deck Builder API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
+
+
+app.include_router(decks_router)
 
 
 @app.get("/api/health")

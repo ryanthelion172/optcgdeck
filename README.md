@@ -41,13 +41,26 @@ npm run dev
 The frontend forwards `/api` requests to the backend during development. To try it on your
 phone, run `npm run dev -- --host` and open the address it prints from a phone on the same Wi-Fi.
 
-`backend/.env` holds your `CARDSIGHTAI_API_KEY`. Git ignores it, so it never goes to GitHub.
-Everything except photo scanning works without a key.
+### Database (Neon Postgres)
+
+Decks can be saved to a Postgres database. Only what the app needs is stored: each deck's name,
+Leader and card counts. There are no accounts, names or emails. Each device makes a random
+"owner key", and the database keeps only a hash of it.
+
+1. Create a free project at [neon.tech](https://neon.tech) and copy its connection string.
+2. Put it in `backend/.env` as `DATABASE_URL=...`.
+3. Create the tables: `cd backend && alembic upgrade head`.
+
+When the tables change later, a new migration goes in `backend/migrations/versions/` and the
+same `alembic upgrade head` command applies it.
+
+`backend/.env` holds your `CARDSIGHTAI_API_KEY` and `DATABASE_URL`. Git ignores it, so it never goes to GitHub.
+Everything except photo scanning and online deck saving works without them.
 
 ## Tests
 
 ```bash
-cd backend && pytest -q
+cd backend && pytest -q          # set TEST_DATABASE_URL to an empty Postgres to include the deck tests
 cd frontend && npm test && npm run lint && npm run build
 ```
 
