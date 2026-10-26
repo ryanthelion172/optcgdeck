@@ -83,9 +83,9 @@ export function ScanModal({ lookup, onCreate, onClose }: Props) {
   )
 
   return (
-    <Modal title="Create deck from photo" onClose={onClose}>
+    <Modal title="Create deck from photo" onClose={onClose} large>
       {!result && (
-        <div className="space-y-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
           <p className="text-sm text-slate-400">
             Lay the cards out so each one is clearly visible, then take or choose a photo. Each scan uses one of
             your CardSight scans.
@@ -94,7 +94,13 @@ export function ScanModal({ lookup, onCreate, onClose }: Props) {
             {fileButton('Take photo', true)}
             {fileButton('Choose photo', false)}
           </div>
-          {preview && <img src={preview} alt="Photo to scan" className="max-h-72 w-full rounded-lg object-contain" />}
+          {preview ? (
+            <img src={preview} alt="Photo to scan" className="min-h-0 w-full flex-1 rounded-lg object-contain" />
+          ) : (
+            <div className="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-dashed border-slate-600 text-sm text-slate-500">
+              Your photo will show here
+            </div>
+          )}
           {error && <p className="text-sm text-red-300">{error}</p>}
           <div className="flex justify-end">
             <Button variant="primary" onClick={scan} disabled={!photo || busy}>
@@ -105,7 +111,7 @@ export function ScanModal({ lookup, onCreate, onClose }: Props) {
       )}
 
       {result && (
-        <div className="space-y-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
           <p className="text-sm text-slate-400">
             Found {result.detected} card{result.detected === 1 ? '' : 's'}. Check the list, fix any counts, then
             create the deck. You can keep editing it afterwards.
@@ -114,7 +120,7 @@ export function ScanModal({ lookup, onCreate, onClose }: Props) {
             Leader: <span className="font-semibold">{leaderRow ? leaderRow.card.name : 'none found, pick one after'}</span>
             <span className="ml-3 text-slate-400">{total} main-deck cards</span>
           </p>
-          <ul className="max-h-[45vh] divide-y divide-slate-800 overflow-y-auto rounded-lg bg-slate-950">
+          <ul className="min-h-0 flex-1 divide-y divide-slate-800 overflow-y-auto rounded-lg bg-slate-950">
             {mainRows.map((r) => (
               <li key={r.card.id} className="flex items-center gap-2 px-2 py-1.5">
                 <CardImage card={r.card} className="!w-10 shrink-0" showText={false} />
@@ -122,7 +128,7 @@ export function ScanModal({ lookup, onCreate, onClose }: Props) {
                   <span className="block truncate text-sm">{r.card.name}</span>
                   <span className="text-xs text-slate-500">
                     {r.card.id}
-                    {r.confidence !== 'High' && <span className="ml-2 text-amber-300">{r.confidence} confidence</span>}
+                    {r.confidence !== 'High' && <span className="block text-amber-300">{r.confidence} confidence</span>}
                   </span>
                 </span>
                 <button
@@ -145,7 +151,7 @@ export function ScanModal({ lookup, onCreate, onClose }: Props) {
             {mainRows.length === 0 && <li className="p-3 text-sm text-slate-400">No main-deck cards recognised.</li>}
           </ul>
           {result.unmatched.length > 0 && (
-            <div className="text-sm text-amber-300">
+            <div className="max-h-32 shrink-0 overflow-y-auto text-sm text-amber-300">
               Couldn't match {result.unmatched.length} card{result.unmatched.length === 1 ? '' : 's'}; add{' '}
               {result.unmatched.length === 1 ? 'it' : 'them'} by hand:
               <ul className="mt-1 list-disc pl-5 text-slate-400">
