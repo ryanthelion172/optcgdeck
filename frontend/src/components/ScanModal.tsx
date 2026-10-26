@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Card } from '../types'
 import { scanPhoto, type ScanResult } from '../lib/api'
 import { maxCopies, type CardLookup } from '../lib/deck'
@@ -20,6 +20,8 @@ export function ScanModal({ lookup, onCreate, onClose }: Props) {
   const [error, setError] = useState('')
   const [result, setResult] = useState<ScanResult | null>(null)
   const [rows, setRows] = useState<Row[]>([])
+  // Counts scans, so a slow answer for an older photo is ignored.
+  const scanId = useRef(0)
 
   useEffect(() => {
     if (!photo) return
@@ -30,6 +32,8 @@ export function ScanModal({ lookup, onCreate, onClose }: Props) {
 
   const pick = (file: File | undefined) => {
     if (!file) return
+    scanId.current++
+    setBusy(false)
     setPhoto(file)
     setResult(null)
     setRows([])
@@ -38,10 +42,12 @@ export function ScanModal({ lookup, onCreate, onClose }: Props) {
 
   const scan = async () => {
     if (!photo) return
+    const id = ++scanId.current
     setBusy(true)
     setError('')
     try {
       const res = await scanPhoto(photo)
+      if (id !== scanId.current) return
       setResult(res)
       setRows(
         res.cards.flatMap((c) => {
@@ -50,9 +56,9 @@ export function ScanModal({ lookup, onCreate, onClose }: Props) {
         }),
       )
     } catch (e) {
-      setError((e as Error).message)
+      if (id === scanId.current) setError((e as Error).message)
     } finally {
-      setBusy(false)
+      if (id === scanId.current) setBusy(false)
     }
   }
 

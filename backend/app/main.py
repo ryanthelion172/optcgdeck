@@ -1,4 +1,5 @@
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -7,13 +8,21 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from .cards import CardStore, get_store
-from .images import MEDIA_TYPES, fetch_image
+from .images import MEDIA_TYPES, close_client, fetch_image
 from .scan import ScanError, build_result, identify
 
 # Secrets such as CARDSIGHTAI_API_KEY live in backend/.env, which git ignores.
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-app = FastAPI(title="OPTCG Deck Builder API")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    yield
+    await close_client()  # close the image download connections on shutdown
+
+
+app = FastAPI(title="OPTCG Deck Builder API", lifespan=lifespan)
 
 # The Vite dev server runs on a different port during development.
 app.add_middleware(

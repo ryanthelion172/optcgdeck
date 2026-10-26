@@ -3,7 +3,7 @@ import type { Card, Deck } from './types'
 import { fetchCards } from './lib/api'
 import { changeCount, deckSize, matchesLeader, newDeck, validateDeck, DECK_SIZE } from './lib/deck'
 import { emptyFilters, type Filters } from './lib/search'
-import { loadCurrentId, loadDecks, saveCurrentId, saveDecks } from './lib/storage'
+import { loadCurrentId, loadDecks, onDecksChangedElsewhere, saveCurrentId, saveDecks } from './lib/storage'
 import { applyTheme, initialTheme, type Theme } from './lib/theme'
 import { CardBrowser } from './components/CardBrowser'
 import { DeckPanel } from './components/DeckPanel'
@@ -46,6 +46,20 @@ export default function App() {
     saveCurrentId(currentId)
   }, [decks, currentId])
 
+  // If the app is open in two tabs, pick up decks saved in the other one
+  // instead of overwriting them with this tab's older copy.
+  useEffect(
+    () =>
+      onDecksChangedElsewhere((latest) => {
+        if (latest.length === 0) return
+        setState((s) => ({
+          decks: latest,
+          currentId: latest.some((d) => d.id === s.currentId) ? s.currentId : latest[0].id,
+        }))
+      }),
+    [],
+  )
+
   const byId = useMemo(() => new Map((cards ?? []).map((c) => [c.id, c])), [cards])
   const lookup = useCallback((id: string) => byId.get(id), [byId])
   const sets = useMemo(() => [...new Set((cards ?? []).map((c) => c.set))].sort(), [cards])
@@ -54,13 +68,15 @@ export default function App() {
   const leader = deck.leaderId ? lookup(deck.leaderId) : undefined
   const problems = useMemo(() => (cards ? validateDeck(deck, lookup) : []), [cards, deck, lookup])
 
-  const updateDeck = (next: Deck) =>
-    setState((s) => ({ ...s, decks: s.decks.map((d) => (d.id === next.id ? next : d)) }))
-  const change = (card: Card, delta: number) => updateDeck(changeCount(deck, card, delta))
+  // Every change is applied to the latest saved deck (not a copy from the last
+  // render), so quick taps in a row can't overwrite each other.
+  const modifyDeck = (id: string, fn: (d: Deck) => Deck) =>
+    setState((s) => ({ ...s, decks: s.decks.map((d) => (d.id === id ? fn(d) : d)) }))
+  const addDeck = (d: Deck) => setState((s) => ({ decks: [...s.decks, d], currentId: d.id }))
+  const change = (card: Card, delta: number) => modifyDeck(deck.id, (d) => changeCount(d, card, delta))
 
   const createDeck = () => {
-    const d = newDeck(`Deck ${decks.length + 1}`)
-    setState({ decks: [...decks, d], currentId: d.id })
+    addDeck(newDeck(`Deck ${decks.length + 1}`))
   }
   const createFromScan = (leaderId: string | null, scanned: Record<string, number>) => {
     const d = {
@@ -68,19 +84,21 @@ export default function App() {
       leaderId,
       cards: scanned,
     }
-    setState({ decks: [...decks, d], currentId: d.id })
+    addDeck(d)
     setShowScan(false)
     setTab('deck')
   }
   const renameDeck = () => {
     const name = prompt('Deck name', deck.name)?.trim()
-    if (name) updateDeck({ ...deck, name, updatedAt: Date.now() })
+    if (name) modifyDeck(deck.id, (d) => ({ ...d, name, updatedAt: Date.now() }))
   }
   const deleteDeck = () => {
     if (!confirm(`Delete "${deck.name}"?`)) return
-    const rest = decks.filter((d) => d.id !== deck.id)
-    if (rest.length === 0) rest.push(newDeck('My first deck'))
-    setState({ decks: rest, currentId: rest[0].id })
+    setState((s) => {
+      const rest = s.decks.filter((d) => d.id !== deck.id)
+      if (rest.length === 0) rest.push(newDeck('My first deck'))
+      return { decks: rest, currentId: rest[0].id }
+    })
   }
   const pickLeader = () => {
     setFilters({ ...emptyFilters, leaders: true })
@@ -202,7 +220,12 @@ export default function App() {
           deck={deck}
           lookup={lookup}
           onImport={(leaderId, imported) =>
-            updateDeck({ ...deck, leaderId: leaderId ?? deck.leaderId, cards: imported, updatedAt: Date.now() })
+            modifyDeck(deck.id, (d) => ({
+              ...d,
+              leaderId: leaderId ?? d.leaderId,
+              cards: imported,
+              updatedAt: Date.now(),
+            }))
           }
           onClose={() => setShowList(false)}
         />

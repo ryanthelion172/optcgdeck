@@ -24,3 +24,12 @@ export const loadDecks = () => read<Deck[]>(DECKS_KEY, [])
 export const saveDecks = (decks: Deck[]) => write(DECKS_KEY, decks)
 export const loadCurrentId = () => read<string | null>(CURRENT_KEY, null)
 export const saveCurrentId = (id: string | null) => write(CURRENT_KEY, id)
+
+/** Calls back with the latest decks when another tab or window saves them. */
+export function onDecksChangedElsewhere(callback: (decks: Deck[]) => void): () => void {
+  const listener = (e: StorageEvent) => {
+    if (e.key === DECKS_KEY) callback(loadDecks())
+  }
+  window.addEventListener('storage', listener)
+  return () => window.removeEventListener('storage', listener)
+}

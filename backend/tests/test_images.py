@@ -69,3 +69,23 @@ def test_alternate_arts_are_not_downloaded(fake_web):
     calls = fake_web(lambda r: httpx.Response(200, content=PNG, headers={"content-type": "image/png"}))
     assert TestClient(app).get("/api/cards/OP01-001_p1/image").status_code == 404
     assert calls == []
+
+
+def test_simultaneous_requests_download_once(fake_web):
+    import asyncio
+
+    async def slow(request):
+        await asyncio.sleep(0.05)
+        return httpx.Response(200, content=PNG, headers={"content-type": "image/png"})
+
+    calls = fake_web(slow)
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return await asyncio.gather(*[client.get("/api/cards/OP01-016/image") for _ in range(5)])
+
+    responses = asyncio.run(run())
+    assert [r.status_code for r in responses] == [200] * 5
+    assert all(r.content == PNG for r in responses)
+    assert len(calls) == 1

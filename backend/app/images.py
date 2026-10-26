@@ -7,8 +7,10 @@ saves it to a local cache folder and serves it from there.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
+import uuid
 from pathlib import Path
 
 import httpx
@@ -61,6 +63,12 @@ def extension_for(content_type: str, url: str) -> str:
 
 _client: httpx.AsyncClient | None = None
 
+# The card grid asks for dozens of images at once. Download at most a few at a
+# time so the image sites don't throttle us, and only once per card even when
+# several requests for the same card arrive together.
+_download_slots = asyncio.Semaphore(6)
+_card_locks: dict[str, asyncio.Lock] = {}
+
 
 def get_client() -> httpx.AsyncClient:
     global _client
@@ -77,6 +85,17 @@ async def fetch_image(card: dict) -> Path | None:
     if path := cached_file(card_id):
         return path
 
+    # One small lock per card id (at most a few thousand, so they're kept).
+    async with _card_locks.setdefault(card_id, asyncio.Lock()):
+        # Another request may have finished the download while we waited.
+        if path := cached_file(card_id):
+            return path
+        async with _download_slots:
+            return await _download(card)
+
+
+async def _download(card: dict) -> Path | None:
+    card_id = card["id"]
     client = get_client()
     for url in source_urls(card):
         try:
@@ -93,8 +112,16 @@ async def fetch_image(card: dict) -> Path | None:
             continue
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         path = CACHE_DIR / f"{card_id}{extension_for(content_type, url)}"
-        tmp = path.with_suffix(path.suffix + ".part")
+        # A unique temp name, then an atomic rename, so a half-written file is never served.
+        tmp = CACHE_DIR / f"{card_id}.{uuid.uuid4().hex}.part"
         tmp.write_bytes(resp.content)
         tmp.replace(path)
         return path
     return None
+
+
+async def close_client() -> None:
+    global _client
+    if _client is not None:
+        await _client.aclose()
+        _client = None
