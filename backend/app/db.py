@@ -32,7 +32,7 @@ def get_engine() -> Engine:
 
 
 @lru_cache(maxsize=1)
-def _session_factory() -> sessionmaker[Session]:
+def session_factory() -> sessionmaker[Session]:
     return sessionmaker(bind=get_engine(), expire_on_commit=False)
 
 
@@ -40,5 +40,5 @@ def get_session() -> Iterator[Session]:
     """FastAPI dependency: one session per request, closed afterwards."""
     if database_url() is None:
         raise HTTPException(status_code=503, detail="Set DATABASE_URL in backend/.env to save decks online.")
-    with _session_factory()() as session:
+    with session_factory()() as session:
         yield session

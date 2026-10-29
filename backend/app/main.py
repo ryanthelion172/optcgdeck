@@ -1,4 +1,3 @@
-import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -14,7 +13,6 @@ from .scan import ScanError, build_result, identify
 
 # Secrets such as CARDSIGHTAI_API_KEY live in backend/.env, which git ignores.
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
-
 
 
 @asynccontextmanager
@@ -48,7 +46,7 @@ def list_cards(request: Request, store: CardStore = Depends(get_store)):
     if request.headers.get("if-none-match") == store.etag:
         return Response(status_code=304, headers=headers)
     return Response(
-        content=store_json(store), media_type="application/json", headers=headers
+        content=store.json, media_type="application/json", headers=headers
     )
 
 
@@ -95,15 +93,3 @@ def scan_photo(photo: UploadFile = File(...), store: CardStore = Depends(get_sto
     result["raw"] = detections
     return result
 
-
-_json_cache: dict[str, bytes] = {}
-
-
-def store_json(store: CardStore) -> bytes:
-    """Serialise the full card list once per data version."""
-    if store.etag not in _json_cache:
-        _json_cache.clear()
-        _json_cache[store.etag] = json.dumps(
-            store.cards, ensure_ascii=False, separators=(",", ":")
-        ).encode()
-    return _json_cache[store.etag]

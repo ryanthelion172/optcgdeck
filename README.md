@@ -4,7 +4,7 @@ A web deck builder for the One Piece Card Game that works on phones and desktop.
 
 **Now:** browse every English card by set and color, pick a Leader, build a 50-card deck with live rule checks
 and a cost curve, import/export decklists (`4xOP01-016` format), and keep several decks saved
-on your device. It can be installed to your home screen as an app.
+in a Postgres database. It can be installed to your home screen as an app.
 
 **Create deck from photo:** take or upload a photo of your cards, check what was recognised,
 fix any counts, and turn it into a deck. Scanning uses the [CardSight AI](https://cardsight.ai)
@@ -13,9 +13,9 @@ API (one API call per photo).
 ## Project layout
 
 ```
-backend/    Python FastAPI app: serves card data (and later, photo scanning)
-  data/cards.json          English card database
-  scripts/import_cards.py  Refreshes cards.json when new sets come out
+backend/    Python FastAPI app: card data, card images, photo scanning and saved decks
+  migrations/              Database tables (Alembic)
+  scripts/import_cards.py  Downloads the English card list into the database
 frontend/   React + TypeScript + Vite + Tailwind app
 ```
 
@@ -29,7 +29,9 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
-cp .env.example .env               # then add your CardSight API key to .env
+cp .env.example .env               # then add DATABASE_URL (and your CardSight key) to .env
+alembic upgrade head               # create the tables
+python scripts/import_cards.py     # load the cards (about 30 seconds)
 uvicorn app.main:app --reload
 
 # Frontend (http://localhost:5173), in a second terminal
@@ -43,24 +45,35 @@ phone, run `npm run dev -- --host` and open the address it prints from a phone o
 
 ### Database (Neon Postgres)
 
-Decks can be saved to a Postgres database. Only what the app needs is stored: each deck's name,
-Leader and card counts. There are no accounts, names or emails. Each device makes a random
-"owner key", and the database keeps only a hash of it.
+The app needs a Postgres database. It holds three tables:
+
+- `cards`: our own copy of the English card list, filled by `scripts/import_cards.py`.
+- `decks`: each deck's name and Leader.
+- `deck_cards`: how many copies of each card a deck has.
+
+Decks point at cards with foreign keys, so they depend only on our copy, never on the outside
+source. The import adds new cards and updates changed ones but never deletes a card, and the
+database refuses to delete a card that a deck uses.
+
+Only what the app needs is stored. There are no accounts, names or emails. Each browser makes a
+random "owner key" (the only thing the app keeps in the browser), and the database keeps only a
+hash of it, so your decks show up in the browser that made them.
 
 1. Create a free project at [neon.tech](https://neon.tech) and copy its connection string.
 2. Put it in `backend/.env` as `DATABASE_URL=...`.
 3. Create the tables: `cd backend && alembic upgrade head`.
+4. Load the cards: `python scripts/import_cards.py`.
 
 When the tables change later, a new migration goes in `backend/migrations/versions/` and the
 same `alembic upgrade head` command applies it.
 
 `backend/.env` holds your `CARDSIGHTAI_API_KEY` and `DATABASE_URL`. Git ignores it, so it never goes to GitHub.
-Everything except photo scanning and online deck saving works without them.
+Everything except photo scanning works without the CardSight key.
 
 ## Tests
 
 ```bash
-cd backend && pytest -q          # set TEST_DATABASE_URL to an empty Postgres to include the deck tests
+cd backend && pytest -q          # set TEST_DATABASE_URL to an empty Postgres to include the database tests
 cd frontend && npm test && npm run lint && npm run build
 ```
 
@@ -69,6 +82,8 @@ cd frontend && npm test && npm run lint && npm run build
 ```bash
 cd backend && python scripts/import_cards.py
 ```
+
+Then restart the backend so it picks up the new cards.
 
 Card data comes from the [Punk Records](https://github.com/buhbbl/punk-records) dataset, which is
 generated from the official One Piece Card Game card list. Card images are downloaded by the

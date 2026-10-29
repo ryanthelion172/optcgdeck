@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import type { Card, Deck } from './types'
-import { fetchCards } from './lib/api'
+import { deleteDeck as deleteDeckOnServer, fetchCards, fetchDecks, saveDeck } from './lib/api'
+import { DeckSaver, type SaveStatus } from './lib/deckSaver'
 import { changeCount, deckSize, matchesLeader, newDeck, validateDeck, DECK_SIZE } from './lib/deck'
 import { emptyFilters, type Filters } from './lib/search'
-import { loadCurrentId, loadDecks, onDecksChangedElsewhere, saveCurrentId, saveDecks } from './lib/storage'
 import { applyTheme, initialTheme, type Theme } from './lib/theme'
 import { CardBrowser } from './components/CardBrowser'
 import { DeckPanel } from './components/DeckPanel'
@@ -12,67 +12,146 @@ import { DecklistModal } from './components/DecklistModal'
 import { ScanModal } from './components/ScanModal'
 import { Button } from './components/ui'
 
-function initialDecks(): { decks: Deck[]; currentId: string } {
-  const decks = loadDecks()
-  if (decks.length === 0) decks.push(newDeck('My first deck'))
-  const saved = loadCurrentId()
-  const currentId = decks.some((d) => d.id === saved) ? saved! : decks[0].id
-  return { decks, currentId }
-}
-
 function filtersFor(leader: Card | undefined): Filters {
   return { ...emptyFilters, colors: leader ? [...leader.colors] : [] }
 }
 
+const SAVE_LABELS: Record<SaveStatus, string> = { saved: 'Saved', saving: 'Saving…', error: 'Not saved' }
+
 export default function App() {
+  const [theme, setTheme] = useState<Theme>(initialTheme)
+  useEffect(() => applyTheme(theme), [theme])
+  const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))
+
   const [cards, setCards] = useState<Card[] | null>(null)
+  const [decks, setDecks] = useState<Deck[] | null>(null)
   const [error, setError] = useState('')
-  const [{ decks, currentId }, setState] = useState(initialDecks)
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved')
+  // The deck objects the server already has. Any deck in state that differs
+  // from its entry here gets saved.
+  const synced = useRef(new Map<string, Deck>())
+  const [saver] = useState(() => new DeckSaver(saveDeck, deleteDeckOnServer, setSaveStatus))
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([fetchCards(), fetchDecks()]).then(
+      ([loadedCards, loadedDecks]) => {
+        if (cancelled) return
+        synced.current = new Map(loadedDecks.map((d) => [d.id, d]))
+        // First visit: start with an empty deck (saved like any other change).
+        setDecks(loadedDecks.length > 0 ? loadedDecks : [newDeck('My first deck')])
+        setCards(loadedCards)
+      },
+      (e: Error) => !cancelled && setError(e.message),
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Save every deck that changed since the last render.
+  useEffect(() => {
+    if (!decks) return
+    for (const d of decks) if (synced.current.get(d.id) !== d) saver.schedule(d)
+    synced.current = new Map(decks.map((d) => [d.id, d]))
+  }, [decks, saver])
+
+  // Send unsaved changes before the page is hidden or closed (e.g. switching apps on a phone).
+  useEffect(() => {
+    const flush = () => {
+      if (document.visibilityState === 'hidden') void saver.flush(true)
+    }
+    const warn = (e: BeforeUnloadEvent) => {
+      if (saveStatus !== 'saved') e.preventDefault()
+    }
+    document.addEventListener('visibilitychange', flush)
+    window.addEventListener('pagehide', flush)
+    window.addEventListener('beforeunload', warn)
+    return () => {
+      document.removeEventListener('visibilitychange', flush)
+      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('beforeunload', warn)
+    }
+  }, [saver, saveStatus])
+
+  if (error || !cards || !decks) {
+    return (
+      <div className="p-6">
+        <h1 className="mb-3 text-base font-bold tracking-tight">
+          <span className="text-red-500">OPTCG</span> Decks
+        </h1>
+        {error ? (
+          <p className="text-red-300">
+            {error}. Is the backend running? Start it with <code>uvicorn app.main:app</code> in the backend folder.
+          </p>
+        ) : (
+          <p className="text-slate-400">Loading cards and decks…</p>
+        )}
+      </div>
+    )
+  }
+  if (cards.length === 0) {
+    return (
+      <p className="p-6 text-slate-300">
+        The card database is empty. Run <code>python scripts/import_cards.py</code> in the backend folder, then
+        restart the backend.
+      </p>
+    )
+  }
+  return (
+    <Builder
+      cards={cards}
+      decks={decks}
+      setDecks={setDecks}
+      saver={saver}
+      saveStatus={saveStatus}
+      theme={theme}
+      onToggleTheme={toggleTheme}
+    />
+  )
+}
+
+function Builder({
+  cards,
+  decks,
+  setDecks,
+  saver,
+  saveStatus,
+  theme,
+  onToggleTheme,
+}: {
+  cards: Card[]
+  decks: Deck[]
+  setDecks: Dispatch<SetStateAction<Deck[] | null>>
+  saver: DeckSaver
+  saveStatus: SaveStatus
+  theme: Theme
+  onToggleTheme: () => void
+}) {
+  const [currentId, setCurrentId] = useState(decks[0].id)
   const [filters, setFilters] = useState<Filters>(emptyFilters)
   const [selected, setSelected] = useState<Card | null>(null)
   const [showList, setShowList] = useState(false)
   const [showScan, setShowScan] = useState(false)
   const [tab, setTab] = useState<'cards' | 'deck'>('cards')
-  const [theme, setTheme] = useState<Theme>(initialTheme)
+  const [deleting, setDeleting] = useState(false)
 
-  useEffect(() => applyTheme(theme), [theme])
-
-  useEffect(() => {
-    fetchCards().then(setCards, (e: Error) => setError(e.message))
-  }, [])
-
-  useEffect(() => {
-    saveDecks(decks)
-    saveCurrentId(currentId)
-  }, [decks, currentId])
-
-  // If the app is open in two tabs, pick up decks saved in the other one
-  // instead of overwriting them with this tab's older copy.
-  useEffect(
-    () =>
-      onDecksChangedElsewhere((latest) => {
-        if (latest.length === 0) return
-        setState((s) => ({
-          decks: latest,
-          currentId: latest.some((d) => d.id === s.currentId) ? s.currentId : latest[0].id,
-        }))
-      }),
-    [],
-  )
-
-  const byId = useMemo(() => new Map((cards ?? []).map((c) => [c.id, c])), [cards])
+  const byId = useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards])
   const lookup = useCallback((id: string) => byId.get(id), [byId])
-  const sets = useMemo(() => [...new Set((cards ?? []).map((c) => c.set))].sort(), [cards])
+  const sets = useMemo(() => [...new Set(cards.map((c) => c.set))].sort(), [cards])
 
-  const deck = decks.find((d) => d.id === currentId)!
+  const deck = decks.find((d) => d.id === currentId) ?? decks[0]
   const leader = deck.leaderId ? lookup(deck.leaderId) : undefined
-  const problems = useMemo(() => (cards ? validateDeck(deck, lookup) : []), [cards, deck, lookup])
+  const problems = useMemo(() => validateDeck(deck, lookup), [deck, lookup])
 
   // Every change is applied to the latest saved deck (not a copy from the last
   // render), so quick taps in a row can't overwrite each other.
   const modifyDeck = (id: string, fn: (d: Deck) => Deck) =>
-    setState((s) => ({ ...s, decks: s.decks.map((d) => (d.id === id ? fn(d) : d)) }))
-  const addDeck = (d: Deck) => setState((s) => ({ decks: [...s.decks, d], currentId: d.id }))
+    setDecks((all) => all && all.map((d) => (d.id === id ? fn(d) : d)))
+  const addDeck = (d: Deck) => {
+    setDecks((all) => all && [...all, d])
+    setCurrentId(d.id)
+  }
   const change = (card: Card, delta: number) => modifyDeck(deck.id, (d) => changeCount(d, card, delta))
 
   const createDeck = () => {
@@ -90,15 +169,27 @@ export default function App() {
   }
   const renameDeck = () => {
     const name = prompt('Deck name', deck.name)?.trim()
-    if (name) modifyDeck(deck.id, (d) => ({ ...d, name, updatedAt: Date.now() }))
+    if (name) modifyDeck(deck.id, (d) => ({ ...d, name: name.slice(0, 100) }))
   }
-  const deleteDeck = () => {
+  const deleteDeck = async () => {
     if (!confirm(`Delete "${deck.name}"?`)) return
-    setState((s) => {
-      const rest = s.decks.filter((d) => d.id !== deck.id)
-      if (rest.length === 0) rest.push(newDeck('My first deck'))
-      return { decks: rest, currentId: rest[0].id }
+    const id = deck.id
+    setDeleting(true)
+    try {
+      await saver.delete(id)
+    } catch (e) {
+      alert(`${(e as Error).message}. The deck was not deleted.`)
+      return
+    } finally {
+      setDeleting(false)
+    }
+    const rest = decks.filter((d) => d.id !== id)
+    if (rest.length === 0) rest.push(newDeck('My first deck'))
+    setDecks((all) => {
+      const left = (all ?? []).filter((d) => d.id !== id)
+      return left.length > 0 ? left : rest
     })
+    setCurrentId(rest[0].id)
   }
   const pickLeader = () => {
     setFilters({ ...emptyFilters, leaders: true })
@@ -127,7 +218,7 @@ export default function App() {
         <select
           aria-label="Current deck"
           value={currentId}
-          onChange={(e) => setState((s) => ({ ...s, currentId: e.target.value }))}
+          onChange={(e) => setCurrentId(e.target.value)}
           className="min-w-0 max-w-[50vw] flex-1 rounded-lg bg-slate-800 px-2 py-2 text-sm sm:flex-none"
         >
           {decks.map((d) => (
@@ -136,8 +227,9 @@ export default function App() {
             </option>
           ))}
         </select>
+        <SaveIndicator status={saveStatus} onRetry={() => void saver.retry()} />
         <button
-          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          onClick={onToggleTheme}
           aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           className="ml-auto flex h-9 w-9 items-center sm:order-last justify-center rounded-lg bg-slate-800 text-lg hover:bg-slate-700"
@@ -147,24 +239,19 @@ export default function App() {
         <div className="flex flex-wrap gap-1.5">
           <Button onClick={createDeck} title="New deck">New</Button>
           <Button onClick={renameDeck} title="Rename deck">Rename</Button>
-          <Button onClick={() => setShowList(true)} title="Import or export a decklist" disabled={!cards}>
+          <Button onClick={() => setShowList(true)} title="Import or export a decklist">
             Decklist
           </Button>
-          <Button variant="danger" onClick={deleteDeck} title="Delete deck">Delete</Button>
-          <Button variant="primary" onClick={() => setShowScan(true)} disabled={!cards}>
+          <Button variant="danger" onClick={() => void deleteDeck()} title="Delete deck" disabled={deleting}>
+            Delete
+          </Button>
+          <Button variant="primary" onClick={() => setShowScan(true)}>
             Create deck from photo
           </Button>
         </div>
       </header>
 
-      {error ? (
-        <p className="p-6 text-red-300">
-          {error}. Is the backend running? Start it with <code>uvicorn app.main:app</code> in the backend folder.
-        </p>
-      ) : !cards ? (
-        <p className="p-6 text-slate-400">Loading cards…</p>
-      ) : (
-        <main className="grid min-h-0 flex-1 lg:grid-cols-[1fr_380px]">
+      <main className="grid min-h-0 flex-1 lg:grid-cols-[1fr_380px]">
           <div className={`min-h-0 ${tab === 'cards' ? 'flex' : 'hidden'} flex-col lg:flex`}>
             <CardBrowser
               cards={cards}
@@ -187,8 +274,7 @@ export default function App() {
               onPickLeader={pickLeader}
             />
           </div>
-        </main>
-      )}
+      </main>
 
       <nav className="grid grid-cols-2 border-t border-slate-800 pb-[env(safe-area-inset-bottom)] lg:hidden">
         {(['cards', 'deck'] as const).map((t) => (
@@ -212,24 +298,34 @@ export default function App() {
           onClose={() => setSelected(null)}
         />
       )}
-      {showScan && cards && (
+      {showScan && (
         <ScanModal lookup={lookup} onCreate={createFromScan} onClose={() => setShowScan(false)} />
       )}
-      {showList && cards && (
+      {showList && (
         <DecklistModal
           deck={deck}
           lookup={lookup}
           onImport={(leaderId, imported) =>
-            modifyDeck(deck.id, (d) => ({
-              ...d,
-              leaderId: leaderId ?? d.leaderId,
-              cards: imported,
-              updatedAt: Date.now(),
-            }))
+            modifyDeck(deck.id, (d) => ({ ...d, leaderId: leaderId ?? d.leaderId, cards: imported }))
           }
           onClose={() => setShowList(false)}
         />
       )}
     </div>
+  )
+}
+
+function SaveIndicator({ status, onRetry }: { status: SaveStatus; onRetry: () => void }) {
+  if (status === 'error') {
+    return (
+      <button onClick={onRetry} className="text-xs text-red-400 underline" title="Try saving again">
+        Not saved · Retry
+      </button>
+    )
+  }
+  return (
+    <span className="text-xs text-slate-500" aria-live="polite">
+      {SAVE_LABELS[status]}
+    </span>
   )
 }

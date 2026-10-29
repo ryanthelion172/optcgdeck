@@ -3,10 +3,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import main, scan
-from app.cards import get_store
+from app.cards import CardStore
 from app.main import app
 
-store = get_store()
+from .conftest import SAMPLE_CARDS
+
+store = CardStore(SAMPLE_CARDS)
 
 
 def det(name=None, number=None, release=None, confidence="High"):

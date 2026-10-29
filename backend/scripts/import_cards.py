@@ -1,9 +1,14 @@
-"""Download English One Piece TCG card data into backend/data/cards.json.
+"""Download English One Piece TCG card data and save it in the `cards` table.
 
 Source: the Punk Records dataset (https://github.com/buhbbl/punk-records),
 which is generated from the official Bandai card list.
 
-Run from the backend folder:  python scripts/import_cards.py
+New cards are added and changed cards are updated. Cards are never deleted,
+so decks that use them keep working even if the source drops a card.
+
+Run from the backend folder, after `alembic upgrade head`:
+    python scripts/import_cards.py
+Then restart the backend so it picks up the new cards.
 """
 
 from __future__ import annotations
@@ -15,8 +20,15 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+BACKEND = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BACKEND))
+
+from app.cards import upsert_cards  # noqa: E402
+from app.db import database_url, session_factory  # noqa: E402
+
 BASE = "https://raw.githubusercontent.com/buhbbl/punk-records/main/english"
-OUT = Path(__file__).resolve().parent.parent / "data" / "cards.json"
 
 
 def fetch_json(url: str):
@@ -62,6 +74,11 @@ def to_card(raw: dict, set_label: str | None) -> dict:
 
 
 def main() -> int:
+    load_dotenv(BACKEND / ".env")
+    if database_url() is None:
+        print("Set DATABASE_URL in backend/.env first.", file=sys.stderr)
+        return 2
+
     packs = fetch_json(f"{BASE}/packs.json")
     index = fetch_json(f"{BASE}/index/cards_by_id.json")
     print(f"{len(index)} entries in index, {len(packs)} packs")
@@ -96,11 +113,10 @@ def main() -> int:
         if base in cards and img:
             cards[base]["variants"].append({"id": alt, "image": img})
 
-    out = sorted(cards.values(), key=lambda c: c["id"])
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")))
+    with session_factory()() as db:
+        saved = upsert_cards(db, list(cards.values()))
     missing = len(base_ids) - len(cards)
-    print(f"wrote {len(out)} cards to {OUT} ({missing} failed)")
+    print(f"saved {saved} cards to the database ({missing} failed to download)")
     return 1 if missing else 0
 
 

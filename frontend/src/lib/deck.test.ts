@@ -38,7 +38,7 @@ function legalDeck(): Deck {
   // 12 x 4 + 1 x 2 = 50
   for (let i = 10; i < 22; i++) cards[`OP01-0${i}`] = 4
   cards['OP01-022'] = 2
-  return { id: 'd', name: 'Test', leaderId: leader.id, cards, updatedAt: 0 }
+  return { id: 'd', name: 'Test', leaderId: leader.id, cards }
 }
 
 describe('validateDeck', () => {

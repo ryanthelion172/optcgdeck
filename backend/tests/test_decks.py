@@ -1,39 +1,20 @@
-"""Deck endpoints, run against a real Postgres.
+"""Deck endpoints, run against a real Postgres (see the `database` fixture)."""
 
-Set TEST_DATABASE_URL to an empty database to run these (CI does). They are
-skipped otherwise. The database is wiped and migrated from scratch.
-"""
-
-import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
 
-TEST_URL = os.environ.get("TEST_DATABASE_URL")
-pytestmark = pytest.mark.skipif(not TEST_URL, reason="TEST_DATABASE_URL not set")
-
 KEY_A = "a" * 40
 KEY_B = "b" * 40
 
 
-@pytest.fixture(scope="module")
-def client():
-    from alembic import command
-    from alembic.config import Config
-
-    from app import db
+@pytest.fixture
+def client(database):
     from app.main import app
 
-    os.environ["DATABASE_URL"] = TEST_URL
-    db.get_engine.cache_clear()
-    db._session_factory.cache_clear()
-    cfg = Config("alembic.ini")
-    command.downgrade(cfg, "base")
-    command.upgrade(cfg, "head")  # also checks the migration works
-    yield TestClient(app)
-    db.get_engine().dispose()
+    return TestClient(app)
 
 
 def put(client, deck_id, body, key=KEY_A):

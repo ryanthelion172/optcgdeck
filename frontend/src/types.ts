@@ -28,5 +28,4 @@ export interface Deck {
   leaderId: string | null
   /** Main deck card counts by card id (Leader not included). */
   cards: Record<string, number>
-  updatedAt: number
 }

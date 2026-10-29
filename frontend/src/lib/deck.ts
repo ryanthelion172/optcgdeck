@@ -19,7 +19,6 @@ export function newDeck(name = 'New deck'): Deck {
     name,
     leaderId: null,
     cards: {},
-    updatedAt: Date.now(),
   }
 }
 
@@ -36,14 +35,14 @@ export function matchesLeader(card: Card, leader: Card | undefined): boolean {
 /** Returns a copy of the deck with `delta` copies of the card added or removed. */
 export function changeCount(deck: Deck, card: Card, delta: number): Deck {
   if (card.category === 'Leader') {
-    return { ...deck, leaderId: delta > 0 ? card.id : null, updatedAt: Date.now() }
+    return { ...deck, leaderId: delta > 0 ? card.id : null }
   }
   const current = deck.cards[card.id] ?? 0
   const next = Math.max(0, Math.min(maxCopies(card.id), current + delta))
   const cards = { ...deck.cards }
   if (next === 0) delete cards[card.id]
   else cards[card.id] = next
-  return { ...deck, cards, updatedAt: Date.now() }
+  return { ...deck, cards }
 }
 
 export interface Problem {
