@@ -33,7 +33,7 @@ python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
 cp .env.example .env               # add your CardSight key; DATABASE_URL already points at the local database
-alembic upgrade head               # create the tables
+python -m alembic upgrade head     # create the tables
 python scripts/import_cards.py     # load the cards (about 30 seconds)
 uvicorn app.main:app --reload
 
@@ -67,14 +67,14 @@ hash of it, so your decks show up in the browser that made them.
    in the background and keeps your data between restarts (`docker compose down` stops it).
    Without Docker, install Postgres from [postgresql.org](https://www.postgresql.org/download/),
    create a database, and put its connection string in `backend/.env` as `DATABASE_URL`.
-2. Create the tables: `cd backend && alembic upgrade head`.
+2. Create the tables: `cd backend && python -m alembic upgrade head`.
 3. Load the cards: `python scripts/import_cards.py`.
 
 When the app is deployed later, point `DATABASE_URL` at a hosted Postgres (for example Neon)
 and run steps 2 and 3 against it. No code changes are needed.
 
 When the tables change later, a new migration goes in `backend/migrations/versions/` and the
-same `alembic upgrade head` command applies it.
+same `python -m alembic upgrade head` command applies it.
 
 `backend/.env` holds your `CARDSIGHTAI_API_KEY` and `DATABASE_URL`. Git ignores it, so it never goes to GitHub.
 Everything except photo scanning works without the CardSight key.

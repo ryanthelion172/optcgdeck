@@ -6,7 +6,7 @@ which is generated from the official Bandai card list.
 New cards are added and changed cards are updated. Cards are never deleted,
 so decks that use them keep working even if the source drops a card.
 
-Run from the backend folder, after `alembic upgrade head`:
+Run from the backend folder, after `python -m alembic upgrade head`:
     python scripts/import_cards.py
 Then restart the backend so it picks up the new cards.
 """
