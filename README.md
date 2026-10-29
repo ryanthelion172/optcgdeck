@@ -24,12 +24,15 @@ frontend/   React + TypeScript + Vite + Tailwind app
 You need Python 3.12+ and Node 20+.
 
 ```bash
+# Database (local Postgres in Docker), from the repo root
+docker compose up -d
+
 # Backend (http://127.0.0.1:8000)
 cd backend
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
-cp .env.example .env               # then add DATABASE_URL (and your CardSight key) to .env
+cp .env.example .env               # add your CardSight key; DATABASE_URL already points at the local database
 alembic upgrade head               # create the tables
 python scripts/import_cards.py     # load the cards (about 30 seconds)
 uvicorn app.main:app --reload
@@ -43,9 +46,10 @@ npm run dev
 The frontend forwards `/api` requests to the backend during development. To try it on your
 phone, run `npm run dev -- --host` and open the address it prints from a phone on the same Wi-Fi.
 
-### Database (Neon Postgres)
+### Database (Postgres)
 
-The app needs a Postgres database. It holds three tables:
+The app needs a Postgres database. For development it runs on your own computer, so nothing is
+stored online. It holds three tables:
 
 - `cards`: our own copy of the English card list, filled by `scripts/import_cards.py`.
 - `decks`: each deck's name and Leader.
@@ -59,10 +63,15 @@ Only what the app needs is stored. There are no accounts, names or emails. Each 
 random "owner key" (the only thing the app keeps in the browser), and the database keeps only a
 hash of it, so your decks show up in the browser that made them.
 
-1. Create a free project at [neon.tech](https://neon.tech) and copy its connection string.
-2. Put it in `backend/.env` as `DATABASE_URL=...`.
-3. Create the tables: `cd backend && alembic upgrade head`.
-4. Load the cards: `python scripts/import_cards.py`.
+1. Start Postgres. The easiest way is Docker: `docker compose up -d` from the repo root starts it
+   in the background and keeps your data between restarts (`docker compose down` stops it).
+   Without Docker, install Postgres from [postgresql.org](https://www.postgresql.org/download/),
+   create a database, and put its connection string in `backend/.env` as `DATABASE_URL`.
+2. Create the tables: `cd backend && alembic upgrade head`.
+3. Load the cards: `python scripts/import_cards.py`.
+
+When the app is deployed later, point `DATABASE_URL` at a hosted Postgres (for example Neon)
+and run steps 2 and 3 against it. No code changes are needed.
 
 When the tables change later, a new migration goes in `backend/migrations/versions/` and the
 same `alembic upgrade head` command applies it.

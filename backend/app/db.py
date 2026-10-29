@@ -1,4 +1,4 @@
-"""Database connection. Set DATABASE_URL in backend/.env to your Neon connection string."""
+"""Database connection. Set DATABASE_URL in backend/.env (see .env.example)."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def database_url() -> str | None:
     url = os.environ.get("DATABASE_URL", "").strip()
     if not url:
         return None
-    # Neon gives "postgresql://..."; tell SQLAlchemy to use the psycopg 3 driver.
+    # Connection strings start "postgresql://"; tell SQLAlchemy to use the psycopg 3 driver.
     for prefix in ("postgresql://", "postgres://"):
         if url.startswith(prefix):
             return "postgresql+psycopg://" + url[len(prefix):]
@@ -27,7 +27,7 @@ def get_engine() -> Engine:
     url = database_url()
     if url is None:
         raise RuntimeError("DATABASE_URL is not set")
-    # pool_pre_ping reconnects cleanly after Neon puts an idle database to sleep.
+    # pool_pre_ping reconnects cleanly if the database restarted or dropped an idle connection.
     return create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5)
 
 
