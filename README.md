@@ -65,8 +65,14 @@ hash of it, so your decks show up in the browser that made them.
 
 1. Start Postgres. The easiest way is Docker: `docker compose up -d` from the repo root starts it
    in the background and keeps your data between restarts (`docker compose down` stops it).
-   Without Docker, install Postgres from [postgresql.org](https://www.postgresql.org/download/),
-   create a database, and put its connection string in `backend/.env` as `DATABASE_URL`.
+   Without Docker, install Postgres (on Ubuntu or WSL: `sudo apt install postgresql`, then
+   `sudo service postgresql start`) and create the user and database that `.env.example` uses:
+   ```bash
+   sudo -u postgres psql -c "CREATE USER optcg WITH PASSWORD 'optcg';" \
+     -c "CREATE DATABASE optcg OWNER optcg ENCODING 'UTF8' TEMPLATE template0;"
+   ```
+   The `ENCODING 'UTF8'` part matters: without it, some systems create the database as
+   `SQL_ASCII`, and the backend fails with "cannot use a string pattern on a bytes-like object".
 2. Create the tables: `cd backend && python -m alembic upgrade head`.
 3. Load the cards: `python scripts/import_cards.py`.
 
