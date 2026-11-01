@@ -22,6 +22,19 @@ export function newDeck(name = 'New deck'): Deck {
   }
 }
 
+/** The first of "New deck 1", "New deck 2", … that no existing deck uses. */
+export function nextNewDeckName(takenNames: Iterable<string>): string {
+  const taken = new Set(takenNames)
+  let n = 1
+  while (taken.has(`New deck ${n}`)) n++
+  return `New deck ${n}`
+}
+
+/** Name for a scanned deck: the Leader and the date (e.g. "Monkey.D.Luffy 11/1/2026"), or "New deck N" with no Leader. */
+export function defaultDeckName(leader: Card | undefined, takenNames: Iterable<string>, date = new Date()): string {
+  return leader ? `${leader.name} ${date.toLocaleDateString()}` : nextNewDeckName(takenNames)
+}
+
 export function deckSize(deck: Deck): number {
   return Object.values(deck.cards).reduce((sum, n) => sum + n, 0)
 }

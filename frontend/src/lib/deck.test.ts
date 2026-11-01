@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Card, Deck } from '../types'
-import { changeCount, costCurve, exportDecklist, parseDecklist, validateDeck } from './deck'
+import { changeCount, costCurve, defaultDeckName, exportDecklist, parseDecklist, validateDeck } from './deck'
 
 function card(id: string, over: Partial<Card> = {}): Card {
   return {
@@ -109,4 +109,15 @@ describe('decklist text', () => {
 it('builds a cost curve', () => {
   const curve = costCurve(legalDeck(), lookup)
   expect(curve.reduce((a, b) => a + b, 0)).toBe(50)
+})
+
+describe('defaultDeckName', () => {
+  const date = new Date(2026, 10, 1)
+  it('uses the Leader name and the date', () => {
+    expect(defaultDeckName({ ...leader, name: 'Zoro' }, [], date)).toBe(`Zoro ${date.toLocaleDateString()}`)
+  })
+  it('uses the smallest free "New deck N" when no Leader was found', () => {
+    expect(defaultDeckName(undefined, [])).toBe('New deck 1')
+    expect(defaultDeckName(undefined, ['New deck 1', 'New deck 3', 'Zoro'])).toBe('New deck 2')
+  })
 })

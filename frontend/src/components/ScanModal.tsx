@@ -1,25 +1,28 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Card } from '../types'
 import { scanPhoto, type ScanResult } from '../lib/api'
-import { maxCopies, type CardLookup } from '../lib/deck'
+import { defaultDeckName, maxCopies, type CardLookup } from '../lib/deck'
 import { CardImage } from './CardImage'
 import { Button, Modal } from './ui'
 
 interface Props {
   lookup: CardLookup
-  onCreate: (leaderId: string | null, cards: Record<string, number>) => void
+  /** Names already used, so a default 'New deck N' doesn't repeat one. */
+  deckNames: string[]
+  onCreate: (name: string, leaderId: string | null, cards: Record<string, number>) => void
   onClose: () => void
 }
 
 type Row = { card: Card; count: number; confidence: string }
 
-export function ScanModal({ lookup, onCreate, onClose }: Props) {
+export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
   const [photo, setPhoto] = useState<File | null>(null)
   const [preview, setPreview] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState<ScanResult | null>(null)
   const [rows, setRows] = useState<Row[]>([])
+  const [name, setName] = useState('')
   // Counts scans, so a slow answer for an older photo is ignored.
   const scanId = useRef(0)
 
@@ -48,13 +51,13 @@ export function ScanModal({ lookup, onCreate, onClose }: Props) {
     try {
       const res = await scanPhoto(photo)
       if (id !== scanId.current) return
+      const found = res.cards.flatMap((c) => {
+        const card = lookup(c.id)
+        return card ? [{ card, count: c.count, confidence: c.confidence }] : []
+      })
       setResult(res)
-      setRows(
-        res.cards.flatMap((c) => {
-          const card = lookup(c.id)
-          return card ? [{ card, count: c.count, confidence: c.confidence }] : []
-        }),
-      )
+      setRows(found)
+      setName(defaultDeckName(found.find((r) => r.card.category === 'Leader')?.card, deckNames))
     } catch (e) {
       if (id === scanId.current) setError((e as Error).message)
     } finally {
@@ -72,7 +75,7 @@ export function ScanModal({ lookup, onCreate, onClose }: Props) {
   const create = () => {
     const cards: Record<string, number> = {}
     for (const r of mainRows) if (r.count > 0) cards[r.card.id] = r.count
-    onCreate(leaderRow?.card.id ?? null, cards)
+    onCreate(name.trim() || defaultDeckName(leaderRow?.card, deckNames), leaderRow?.card.id ?? null, cards)
   }
 
   const fileButton = (label: string, capture: boolean) => (
@@ -122,6 +125,15 @@ export function ScanModal({ lookup, onCreate, onClose }: Props) {
             Found {result.detected} card{result.detected === 1 ? '' : 's'}. Check the list, fix any counts, then
             create the deck. You can keep editing it afterwards.
           </p>
+          <label className="flex shrink-0 flex-col gap-1 text-sm">
+            <span className="text-slate-400">Deck name</span>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={100}
+              className="rounded-lg bg-slate-800 px-3 py-2"
+            />
+          </label>
           <p className="text-sm">
             Leader: <span className="font-semibold">{leaderRow ? leaderRow.card.name : 'none found, pick one after'}</span>
             <span className="ml-3 text-slate-400">{total} main-deck cards</span>

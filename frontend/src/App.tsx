@@ -157,9 +157,9 @@ function Builder({
   const createDeck = () => {
     addDeck(newDeck(`Deck ${decks.length + 1}`))
   }
-  const createFromScan = (leaderId: string | null, scanned: Record<string, number>) => {
+  const createFromScan = (name: string, leaderId: string | null, scanned: Record<string, number>) => {
     const d = {
-      ...newDeck(`Scanned deck ${new Date().toLocaleDateString()}`),
+      ...newDeck(name),
       leaderId,
       cards: scanned,
     }
@@ -299,7 +299,7 @@ function Builder({
         />
       )}
       {showScan && (
-        <ScanModal lookup={lookup} onCreate={createFromScan} onClose={() => setShowScan(false)} />
+        <ScanModal lookup={lookup} deckNames={decks.map((d) => d.name)} onCreate={createFromScan} onClose={() => setShowScan(false)} />
       )}
       {showList && (
         <DecklistModal
