@@ -7,7 +7,7 @@ from app.cards import CardStore
 from app.main import app
 
 from .conftest import SAMPLE_CARDS
-from .photos import blank_photo, deck_photo
+from .photos import blank_photo, deck_photo, single_card_photo
 
 store = CardStore(SAMPLE_CARDS)
 
@@ -165,3 +165,62 @@ def test_whole_photo_adds_cards_the_crops_missed(monkeypatch):
         {"id": "OP01-016", "count": 2, "confidence": "High"},  # from the two crops
         {"id": "OP01-001", "count": 1, "confidence": "High"},  # only the whole photo saw it
     ]
+
+
+def test_single_card_scan_keeps_the_most_confident_answer(monkeypatch):
+    calls = []
+
+    def fake(image, filename, mime):
+        calls.append(filename)
+        if filename == "card.jpg":  # the whole photo
+            return [det(number="OP01-001", confidence="Low")]
+        return [det(number="OP01-016", confidence="Medium")]
+
+    monkeypatch.setattr(main, "identify", fake)
+    resp = TestClient(app).post(
+        "/api/scan", files={"photo": ("card.jpg", single_card_photo(), "image/jpeg")}, data={"mode": "single"}
+    )
+    body = resp.json()
+    assert sorted(calls) == ["card-1.jpg", "card.jpg"]
+    assert body["cards"] == [{"id": "OP01-016", "count": 1, "confidence": "Medium"}]
+    assert body["detected"] == body["cardsFound"] == 1
+    assert body["unmatched"] == []
+
+
+def test_single_card_scan_falls_back_to_the_whole_photo(monkeypatch):
+    def fake(image, filename, mime):
+        return [det(number="OP01-016")] if filename == "card.jpg" else []
+
+    monkeypatch.setattr(main, "identify", fake)
+    body = TestClient(app).post(
+        "/api/scan", files={"photo": ("card.jpg", single_card_photo(), "image/jpeg")}, data={"mode": "single"}
+    ).json()
+    assert body["cards"] == [{"id": "OP01-016", "count": 1, "confidence": "High"}]
+
+
+def test_single_card_scan_reports_an_unrecognised_card(monkeypatch):
+    monkeypatch.setattr(main, "identify", lambda *a: [])
+    body = TestClient(app).post(
+        "/api/scan", files={"photo": ("card.jpg", blank_photo(), "image/jpeg")}, data={"mode": "single"}
+    ).json()
+    assert body["cards"] == [] and body["cardsFound"] == 0
+    assert body["unmatched"][0]["label"].startswith("The card")
+
+
+def test_scan_rejects_unknown_modes():
+    resp = TestClient(app).post(
+        "/api/scan", files={"photo": ("d.jpg", blank_photo(), "image/jpeg")}, data={"mode": "binder"}
+    )
+    assert resp.status_code == 422
+
+
+def test_deck_scan_of_one_close_up_card_uses_the_whole_photo(monkeypatch):
+    """One outline found but not recognised, while the whole photo is: no 'not recognised' row."""
+
+    def fake(image, filename, mime):
+        return [det(number="OP01-016")] if filename == "card.jpg" else []
+
+    monkeypatch.setattr(main, "identify", fake)
+    body = TestClient(app).post("/api/scan", files={"photo": ("card.jpg", single_card_photo(), "image/jpeg")}).json()
+    assert body["cards"] == [{"id": "OP01-016", "count": 1, "confidence": "High"}]
+    assert body["unmatched"] == []

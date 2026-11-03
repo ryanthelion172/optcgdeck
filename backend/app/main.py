@@ -1,8 +1,9 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -78,15 +79,22 @@ MAX_PHOTO_BYTES = 15 * 1024 * 1024
 
 
 @app.post("/api/scan")
-def scan_photo(photo: UploadFile = File(...), store: CardStore = Depends(get_store)) -> dict:
-    """Identifies the cards in a photo: one CardSight API call per card found."""
+def scan_photo(
+    photo: UploadFile = File(...),
+    mode: Literal["deck", "single"] = Form("deck"),
+    store: CardStore = Depends(get_store),
+) -> dict:
+    """Identifies the cards in a photo: one CardSight API call per card found.
+
+    `mode` "single" says the photo is of one card, which may fill most of the frame.
+    """
     if not (photo.content_type or "").startswith("image/"):
         raise HTTPException(status_code=400, detail="Please upload a photo.")
     image = photo.file.read(MAX_PHOTO_BYTES + 1)
     if len(image) > MAX_PHOTO_BYTES:
         raise HTTPException(status_code=413, detail="That photo is too large (15 MB max).")
     try:
-        return scan(image, photo.filename or "photo.jpg", photo.content_type, store, identify)
+        return scan(image, photo.filename or "photo.jpg", photo.content_type, store, identify, single=mode == "single")
     except BadImage as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ScanError as exc:
