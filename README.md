@@ -6,9 +6,11 @@ A web deck builder for the One Piece Card Game that works on phones and desktop.
 and a cost curve, import/export decklists (`4xOP01-016` format), and keep several decks saved
 in a Postgres database. It can be installed to your home screen as an app.
 
-**Create deck from photo:** take or upload a photo of your cards, check what was recognised,
-fix any counts, and turn it into a deck. Scanning uses the [CardSight AI](https://cardsight.ai)
-API (one API call per photo).
+**Create deck from photo:** lay out one copy of each card, take or upload a photo, check what was
+recognised, set the counts, and turn it into a deck. The backend finds each card in the photo with
+OpenCV, crops it, and identifies it with the [CardSight AI](https://cardsight.ai) API (one API call
+per card found). Photos work best with the cards flat, not overlapping, on a plain background that
+contrasts with them.
 
 ## Project layout
 

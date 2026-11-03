@@ -1,15 +1,25 @@
-"""Turns a photo of cards into card ids using the CardSight AI API.
+"""Turns a photo of cards into card ids.
 
-The API key is read from CARDSIGHTAI_API_KEY (put it in backend/.env).
-Each scan uses one API call, however many cards are in the photo.
+OpenCV finds each card in the photo (see detect.py), and each card is sent on
+its own to the CardSight AI API, which identifies it. The API key is read
+from CARDSIGHTAI_API_KEY (put it in backend/.env).
+
+A scan uses one API call per card found. If no cards are found, the whole
+photo is sent in one call instead.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
+from .detect import find_cards
+
 SEGMENT = "onepiece"
+PARALLEL_CALLS = 8
+CONFIDENCE = {"High": 3, "Medium": 2, "Low": 1}
 
 CARD_ID = re.compile(r"\b([A-Z]{1,4}\d{0,2})-?(\d{3})\b", re.IGNORECASE)
 SET_CODE = re.compile(r"\b(OP|ST|EB|PRB)-?(\d{2})\b", re.IGNORECASE)
@@ -117,3 +127,62 @@ def build_result(detections: list[dict], store) -> dict:
         if order.index(confidence) < order.index(entry["confidence"]):
             entry["confidence"] = confidence
     return {"detected": len(detections), "cards": list(counts.values()), "unmatched": unmatched}
+
+
+Identify = Callable[[bytes, str, str], list[dict]]
+
+
+def scan(image: bytes, filename: str, mime_type: str, store, identify: Identify = identify) -> dict:
+    """Finds the cards in a photo and identifies each one. Returns build_result plus debug info.
+
+    Each card found is identified on its own. The whole photo is also sent once,
+    and any card it recognises that the crops missed is added, which helps with
+    cards the outline finder can't separate (stacks, cluttered photos).
+    """
+    crops = find_cards(image)
+
+    def one(i: int):
+        try:
+            if i < 0:
+                return identify(image, filename, mime_type), None
+            return identify(crops[i].jpeg, f"card-{i + 1}.jpg", "image/jpeg"), None
+        except ScanError as exc:
+            return [], exc
+
+    with ThreadPoolExecutor(PARALLEL_CALLS) as pool:
+        whole_future = pool.submit(one, -1)
+        answers = list(pool.map(one, range(len(crops))))
+        whole, whole_error = whole_future.result()
+
+    errors = [err for _, err in answers if err] + ([whole_error] if whole_error else [])
+    if errors and len(errors) == len(answers) + 1:
+        raise errors[0]  # e.g. no API key, or the service is down
+    for err in errors:
+        if err.status == 503:
+            raise err
+
+    detections, unreadable = [], []
+    for i, (found, err) in enumerate(answers):
+        if found:
+            # Each crop holds one card; keep CardSight's most confident answer.
+            detections.append(max(found, key=lambda d: CONFIDENCE.get(d.get("confidence"), 0)))
+        else:
+            unreadable.append({"label": f"Card {i + 1} in the photo (not recognised)", "confidence": "Low"})
+
+    result = build_result(detections, store)
+    from_whole = build_result(whole, store)
+    have = {c["id"] for c in result["cards"]}
+    result["cards"] += [c for c in from_whole["cards"] if c["id"] not in have]
+    if not crops:
+        result["unmatched"] = from_whole["unmatched"]
+    result["unmatched"] += unreadable
+    result["detected"] = len(crops) or from_whole["detected"]
+    result["cardsFound"] = len(crops)
+    result["raw"] = {
+        "cards": [
+            {"card": i + 1, "corners": crops[i].corners, "detections": found, "error": str(err) if err else None}
+            for i, (found, err) in enumerate(answers)
+        ],
+        "wholePhoto": {"detections": whole, "error": str(whole_error) if whole_error else None},
+    }
+    return result

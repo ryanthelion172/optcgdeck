@@ -96,8 +96,8 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
       {!result && (
         <div className="flex min-h-0 flex-1 flex-col gap-3">
           <p className="text-sm text-slate-400">
-            Lay the cards out so each one is clearly visible, then take or choose a photo. Each scan uses one of
-            your CardSight scans.
+            Lay out one copy of each card, flat and not overlapping, on a plain background that stands out from
+            the cards. Then take or choose a photo. You can set how many copies of each card after the scan.
           </p>
           <div className="flex gap-2">
             {fileButton('Take photo', true)}

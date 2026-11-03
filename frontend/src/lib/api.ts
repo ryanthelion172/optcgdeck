@@ -83,18 +83,21 @@ export interface ScanResult {
   detected: number
   cards: { id: string; count: number; confidence: 'High' | 'Medium' | 'Low' }[]
   unmatched: { label: string; confidence: string }[]
-  /** CardSight's raw detections, for debugging. */
-  raw?: unknown[]
+  /** How many cards OpenCV found in the photo (0 means the whole photo was sent instead). */
+  cardsFound?: number
+  /** CardSight's raw answers, per card found, for debugging. */
+  raw?: unknown
 }
 
-/** Sends a photo to the backend, which identifies the cards with CardSight (one API call). */
+/** Sends a photo to the backend, which finds each card and identifies it with CardSight. */
 export async function scanPhoto(photo: File): Promise<ScanResult> {
   const body = new FormData()
   body.append('photo', photo)
   const resp = await check(await fetch(`${API_BASE}/api/scan`, { method: 'POST', body }), 'Scan failed')
   const result: ScanResult = await resp.json()
   // Debugging aid: open the browser console (F12) to see what CardSight returned.
-  console.log('CardSight raw detections:', result.raw)
+  console.log(`Cards found in the photo: ${result.cardsFound}`)
+  console.log('CardSight raw answers:', result.raw)
   console.log('Matched result:', { detected: result.detected, cards: result.cards, unmatched: result.unmatched })
   return result
 }

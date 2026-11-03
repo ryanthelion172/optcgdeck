@@ -7,6 +7,7 @@ from app.cards import CardStore
 from app.main import app
 
 from .conftest import SAMPLE_CARDS
+from .photos import blank_photo, deck_photo
 
 store = CardStore(SAMPLE_CARDS)
 
@@ -75,28 +76,31 @@ def test_identify_sends_named_file_and_parses_response(monkeypatch):
     assert scan.match_card(detections[0]["card"], store) == "OP01-016"
 
 
-def test_scan_endpoint(monkeypatch):
+def test_scan_sends_the_whole_photo_when_no_cards_are_found(monkeypatch):
     calls = []
+    photo = blank_photo()
 
     def fake_identify(image, filename, mime):
         calls.append((image, filename, mime))
         return [det(number="OP01-016"), det(number="OP01-016")]
 
     monkeypatch.setattr(main, "identify", fake_identify)
-    resp = TestClient(app).post("/api/scan", files={"photo": ("deck.jpg", b"img", "image/jpeg")})
+    resp = TestClient(app).post("/api/scan", files={"photo": ("deck.jpg", photo, "image/jpeg")})
     assert resp.status_code == 200
     assert resp.json()["cards"] == [{"id": "OP01-016", "count": 2, "confidence": "High"}]
-    assert calls == [(b"img", "deck.jpg", "image/jpeg")]
+    assert calls == [(photo, "deck.jpg", "image/jpeg")]
 
 
 def test_scan_rejects_non_images():
     resp = TestClient(app).post("/api/scan", files={"photo": ("x.txt", b"hi", "text/plain")})
     assert resp.status_code == 400
+    resp = TestClient(app).post("/api/scan", files={"photo": ("x.jpg", b"not really", "image/jpeg")})
+    assert resp.status_code == 400
 
 
 def test_scan_without_api_key(monkeypatch):
     monkeypatch.delenv("CARDSIGHTAI_API_KEY", raising=False)
-    resp = TestClient(app).post("/api/scan", files={"photo": ("deck.jpg", b"img", "image/jpeg")})
+    resp = TestClient(app).post("/api/scan", files={"photo": ("deck.jpg", blank_photo(), "image/jpeg")})
     assert resp.status_code == 503
     assert "CARDSIGHTAI_API_KEY" in resp.json()["detail"]
 
@@ -104,5 +108,60 @@ def test_scan_without_api_key(monkeypatch):
 def test_scan_endpoint_includes_raw_detections(monkeypatch):
     raw = [det(name="Mystery", number="999")]
     monkeypatch.setattr(main, "identify", lambda *a: raw)
-    resp = TestClient(app).post("/api/scan", files={"photo": ("deck.jpg", b"img", "image/jpeg")})
-    assert resp.json()["raw"] == raw
+    resp = TestClient(app).post("/api/scan", files={"photo": ("deck.jpg", blank_photo(), "image/jpeg")})
+    assert resp.json()["raw"]["wholePhoto"]["detections"] == raw
+
+
+def test_scan_identifies_each_card_found(monkeypatch):
+    """Six cards in the photo: six calls, one per cropped card."""
+    answers = iter(["OP01-016", "OP01-013", "OP01-001", "OP01-016", None, "OP01-025"])
+    calls = []
+
+    def fake_identify(image, filename, mime):
+        if filename == "deck.jpg":
+            return []  # the whole-photo call finds nothing extra here
+        calls.append((filename, mime))
+        number = next(answers)
+        if number is None:
+            return []  # CardSight didn't recognise this one
+        return [det(number=number, confidence="Low"), det(number=number, confidence="High")]
+
+    monkeypatch.setattr(main, "identify", fake_identify)
+    monkeypatch.setattr(scan, "PARALLEL_CALLS", 1)  # keep the answers in order
+    resp = TestClient(app).post("/api/scan", files={"photo": ("deck.jpg", deck_photo(6), "image/jpeg")})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert len(calls) == 6 and all(m == "image/jpeg" for _, m in calls)
+    assert body["cardsFound"] == body["detected"] == 6
+    assert {"id": "OP01-016", "count": 2, "confidence": "High"} in body["cards"]
+    assert {"id": "OP01-001", "count": 1, "confidence": "High"} in body["cards"]
+    assert body["unmatched"] == [{"label": "Card 5 in the photo (not recognised)", "confidence": "Low"}]
+    assert len(body["raw"]["cards"]) == 6 and len(body["raw"]["cards"][0]["corners"]) == 4
+
+
+def test_scan_keeps_going_when_some_cards_fail(monkeypatch):
+    def flaky(image, filename, mime):
+        if filename == "d.jpg":
+            return []
+        if filename == "card-2.jpg":
+            raise scan.ScanError("timeout")
+        return [det(number="OP01-016")]
+
+    monkeypatch.setattr(main, "identify", flaky)
+    body = TestClient(app).post("/api/scan", files={"photo": ("d.jpg", deck_photo(3), "image/jpeg")}).json()
+    assert body["cards"] == [{"id": "OP01-016", "count": 2, "confidence": "High"}]
+    assert body["unmatched"][0]["label"].startswith("Card 2")
+
+
+def test_whole_photo_adds_cards_the_crops_missed(monkeypatch):
+    def fake(image, filename, mime):
+        if filename == "deck.jpg":  # the whole photo
+            return [det(number="OP01-016"), det(number="OP01-001")]
+        return [det(number="OP01-016")]
+
+    monkeypatch.setattr(main, "identify", fake)
+    body = TestClient(app).post("/api/scan", files={"photo": ("deck.jpg", deck_photo(2), "image/jpeg")}).json()
+    assert body["cards"] == [
+        {"id": "OP01-016", "count": 2, "confidence": "High"},  # from the two crops
+        {"id": "OP01-001", "count": 1, "confidence": "High"},  # only the whole photo saw it
+    ]

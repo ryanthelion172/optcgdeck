@@ -9,7 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from .cards import CardStore, get_store
 from .decks import router as decks_router
 from .images import MEDIA_TYPES, close_client, fetch_image
-from .scan import ScanError, build_result, identify
+from .detect import BadImage
+from .scan import ScanError, identify, scan
 
 # Secrets such as CARDSIGHTAI_API_KEY live in backend/.env, which git ignores.
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -78,18 +79,16 @@ MAX_PHOTO_BYTES = 15 * 1024 * 1024
 
 @app.post("/api/scan")
 def scan_photo(photo: UploadFile = File(...), store: CardStore = Depends(get_store)) -> dict:
-    """Identifies the cards in a photo. Uses one CardSight API call."""
+    """Identifies the cards in a photo: one CardSight API call per card found."""
     if not (photo.content_type or "").startswith("image/"):
         raise HTTPException(status_code=400, detail="Please upload a photo.")
     image = photo.file.read(MAX_PHOTO_BYTES + 1)
     if len(image) > MAX_PHOTO_BYTES:
         raise HTTPException(status_code=413, detail="That photo is too large (15 MB max).")
     try:
-        detections = identify(image, photo.filename or "photo.jpg", photo.content_type)
+        return scan(image, photo.filename or "photo.jpg", photo.content_type, store, identify)
+    except BadImage as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ScanError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
-    result = build_result(detections, store)
-    # Debugging aid: include CardSight's raw detections so the browser can log them.
-    result["raw"] = detections
-    return result
 
