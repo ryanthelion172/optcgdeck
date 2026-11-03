@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Card } from '../types'
-import { scanPhoto, type ScanResult } from '../lib/api'
+import { scanPhoto, type ScanMode, type ScanResult } from '../lib/api'
 import { defaultDeckName, maxCopies, type CardLookup } from '../lib/deck'
 import { CardImage } from './CardImage'
 import { Button, Modal } from './ui'
@@ -16,6 +16,7 @@ interface Props {
 type Row = { card: Card; count: number; confidence: string }
 
 export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
+  const [mode, setMode] = useState<ScanMode>('deck')
   const [photo, setPhoto] = useState<File | null>(null)
   const [preview, setPreview] = useState('')
   const [busy, setBusy] = useState(false)
@@ -49,7 +50,7 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
     setBusy(true)
     setError('')
     try {
-      const res = await scanPhoto(photo)
+      const res = await scanPhoto(photo, mode)
       if (id !== scanId.current) return
       const found = res.cards.flatMap((c) => {
         const card = lookup(c.id)
@@ -78,6 +79,21 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
     onCreate(name.trim() || defaultDeckName(leaderRow?.card, deckNames), leaderRow?.card.id ?? null, cards)
   }
 
+  const modeButton = (m: ScanMode, label: string) => (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={mode === m}
+      disabled={busy}
+      onClick={() => setMode(m)}
+      className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+        mode === m ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-slate-200 disabled:opacity-50'
+      }`}
+    >
+      {label}
+    </button>
+  )
+
   const fileButton = (label: string, capture: boolean) => (
     <label className="cursor-pointer rounded-lg bg-slate-800 px-3 py-2 text-sm font-medium hover:bg-slate-700">
       {label}
@@ -95,9 +111,14 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
     <Modal title="Create deck from photo" onClose={onClose} large>
       {!result && (
         <div className="flex min-h-0 flex-1 flex-col gap-3">
+          <div role="radiogroup" aria-label="What's in the photo" className="flex w-fit gap-1 rounded-lg bg-slate-800 p-1">
+            {modeButton('deck', 'Whole deck')}
+            {modeButton('single', 'One card')}
+          </div>
           <p className="text-sm text-slate-400">
-            Lay out one copy of each card, flat and not overlapping, on a plain background that stands out from
-            the cards. Then take or choose a photo. You can set how many copies of each card after the scan.
+            {mode === 'deck'
+              ? 'Lay out one copy of each card, flat and not overlapping, on a plain background that stands out from the cards. Then take or choose a photo. You can set how many copies of each card after the scan.'
+              : 'Take or choose a photo of one card. It can fill most of the photo. You can set how many copies after the scan.'}
           </p>
           <div className="flex gap-2">
             {fileButton('Take photo', true)}

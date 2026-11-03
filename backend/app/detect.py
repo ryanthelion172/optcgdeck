@@ -17,6 +17,7 @@ CARD_RATIO = 88 / 63
 RATIO_RANGE = (1.2, 1.6)  # allows for photos taken a little off straight-on
 MIN_AREA = 0.002  # smallest card, as a share of the photo
 MAX_AREA = 0.9
+SINGLE_MAX_AREA = 0.98  # a photo of one card can be almost all card
 DETECT_SIZE = 1200  # photos are resized so the longest side is this, up or down, before finding outlines
 CROP_SIZE = (630, 880)  # width, height of each cropped card
 MAX_CARDS = 60
@@ -47,11 +48,16 @@ def decode(image: bytes) -> np.ndarray:
 VARIANTS = [(0, 50, 150), (3, 50, 150), (3, 30, 100), (5, 50, 150), (5, 30, 100)]
 
 
-def find_outlines(img: np.ndarray) -> list[np.ndarray]:
+def find_outlines(img: np.ndarray, single: bool = False) -> list[np.ndarray]:
     """Returns each card's four corners (in `img` pixels), in reading order.
 
     Edge detection is run with a few settings and the one that finds the most
-    cards of a similar size wins, since no single setting suits every photo.
+    cards of a similar size wins, since no single setting suits every photo. On
+    a tie the larger boxes win, since a faint outer edge loses to the card's
+    inner frame with some settings.
+
+    With `single`, the photo holds one card: the biggest card-shaped outline is
+    returned on its own, and it may fill nearly the whole photo.
     """
     h, w = img.shape[:2]
     # A fixed working size keeps edge widths and gaps between cards comparable for any photo.
@@ -60,15 +66,22 @@ def find_outlines(img: np.ndarray) -> list[np.ndarray]:
     small = cv2.resize(img, (round(w * scale), round(h * scale)), interpolation=interpolation)
     blur = cv2.GaussianBlur(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY), (5, 5), 0)
 
+    max_area = SINGLE_MAX_AREA if single else MAX_AREA
     best: list[np.ndarray] = []
+    best_key = (0, 0.0)
     for close, low, high in VARIANTS:
-        boxes = similar_size(drop_nested(card_shapes(blur, close, low, high)))
-        if len(boxes) > len(best):
-            best = boxes
+        boxes = card_shapes(blur, close, low, high, max_area)
+        if single:
+            boxes = sorted(boxes, key=cv2.contourArea)[-1:]
+        else:
+            boxes = similar_size(drop_nested(boxes))
+        key = (len(boxes), sum(cv2.contourArea(b) for b in boxes))
+        if key > best_key:
+            best, best_key = boxes, key
     return reading_order([box / scale for box in best])[:MAX_CARDS]
 
 
-def card_shapes(gray: np.ndarray, close: int, low: int, high: int) -> list[np.ndarray]:
+def card_shapes(gray: np.ndarray, close: int, low: int, high: int, max_area: float = MAX_AREA) -> list[np.ndarray]:
     """Every outline in the picture that has a card's shape."""
     edges = cv2.Canny(gray, low, high)
     if close:
@@ -85,7 +98,7 @@ def card_shapes(gray: np.ndarray, close: int, low: int, high: int) -> list[np.nd
         if min(rw, rh) < 1:
             continue
         area = rw * rh
-        if not MIN_AREA * photo_area <= area <= MAX_AREA * photo_area:
+        if not MIN_AREA * photo_area <= area <= max_area * photo_area:
             continue
         if not RATIO_RANGE[0] <= max(rw, rh) / min(rw, rh) <= RATIO_RANGE[1]:
             continue
@@ -188,11 +201,12 @@ def crop(img: np.ndarray, corners: np.ndarray) -> np.ndarray:
     return cv2.warpPerspective(img, matrix, (cw, ch))
 
 
-def find_cards(image: bytes) -> list[FoundCard]:
+def find_cards(image: bytes, single: bool = False) -> list[FoundCard]:
+    """Crops each card in the photo. With `single`, at most one: the photo is of one card."""
     img = decode(image)
     h, w = img.shape[:2]
     cards = []
-    for box in find_outlines(img):
+    for box in find_outlines(img, single):
         corners = order_corners(box)
         ok, jpeg = cv2.imencode(".jpg", crop(img, corners), [cv2.IMWRITE_JPEG_QUALITY, 90])
         if ok:

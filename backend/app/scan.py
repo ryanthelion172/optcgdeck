@@ -4,8 +4,9 @@ OpenCV finds each card in the photo (see detect.py), and each card is sent on
 its own to the CardSight AI API, which identifies it. The API key is read
 from CARDSIGHTAI_API_KEY (put it in backend/.env).
 
-A scan uses one API call per card found. If no cards are found, the whole
-photo is sent in one call instead.
+A deck scan uses one API call per card found, plus one for the whole photo.
+A single-card scan uses two: the straightened card (if its outline was found)
+and the whole photo, keeping whichever answer is more confident.
 """
 
 from __future__ import annotations
@@ -132,13 +133,61 @@ def build_result(detections: list[dict], store) -> dict:
 Identify = Callable[[bytes, str, str], list[dict]]
 
 
-def scan(image: bytes, filename: str, mime_type: str, store, identify: Identify = identify) -> dict:
+def best(detections: list[dict]) -> dict | None:
+    return max(detections, key=lambda d: CONFIDENCE.get(d.get("confidence"), 0), default=None)
+
+
+def scan_single(image: bytes, filename: str, mime_type: str, store, identify: Identify = identify) -> dict:
+    """Identifies the one card in a photo, close up or with some background around it.
+
+    The straightened crop and the whole photo are both sent, since a close-up can
+    hide the card's edges and leave only an inner frame to crop.
+    """
+    crops = find_cards(image, single=True)
+    jobs = [(image, filename, mime_type)] + [(c.jpeg, "card-1.jpg", "image/jpeg") for c in crops]
+
+    def one(job):
+        try:
+            return identify(*job), None
+        except ScanError as exc:
+            return [], exc
+
+    with ThreadPoolExecutor(len(jobs)) as pool:
+        (whole, whole_error), *crop_answer = list(pool.map(one, jobs))
+    crop_found, crop_error = crop_answer[0] if crop_answer else ([], None)
+
+    errors = [e for e in (whole_error, crop_error) if e]
+    if errors and (len(errors) == len(jobs) or any(e.status == 503 for e in errors)):
+        raise errors[0]
+
+    # Prefer the crop on a tie: it's the card alone, straightened.
+    pick = best([d for d in (best(crop_found), best(whole)) if d])
+    result = build_result([pick] if pick else [], store)
+    if not pick:
+        result["unmatched"] = [{"label": "The card in the photo (not recognised)", "confidence": "Low"}]
+    result["detected"] = 1
+    result["cardsFound"] = len(crops)
+    result["raw"] = {
+        "cards": [
+            {"card": 1, "corners": c.corners, "detections": crop_found, "error": str(crop_error) if crop_error else None}
+            for c in crops
+        ],
+        "wholePhoto": {"detections": whole, "error": str(whole_error) if whole_error else None},
+    }
+    return result
+
+
+def scan(image: bytes, filename: str, mime_type: str, store, identify: Identify = identify, single: bool = False) -> dict:
     """Finds the cards in a photo and identifies each one. Returns build_result plus debug info.
 
     Each card found is identified on its own. The whole photo is also sent once,
     and any card it recognises that the crops missed is added, which helps with
     cards the outline finder can't separate (stacks, cluttered photos).
+
+    With `single`, the photo is of one card (see scan_single).
     """
+    if single:
+        return scan_single(image, filename, mime_type, store, identify)
     crops = find_cards(image)
 
     def one(i: int):
@@ -165,14 +214,19 @@ def scan(image: bytes, filename: str, mime_type: str, store, identify: Identify 
     for i, (found, err) in enumerate(answers):
         if found:
             # Each crop holds one card; keep CardSight's most confident answer.
-            detections.append(max(found, key=lambda d: CONFIDENCE.get(d.get("confidence"), 0)))
+            detections.append(best(found))
         else:
             unreadable.append({"label": f"Card {i + 1} in the photo (not recognised)", "confidence": "Low"})
 
     result = build_result(detections, store)
     from_whole = build_result(whole, store)
     have = {c["id"] for c in result["cards"]}
-    result["cards"] += [c for c in from_whole["cards"] if c["id"] not in have]
+    extra = [c for c in from_whole["cards"] if c["id"] not in have]
+    result["cards"] += extra
+    if len(crops) == 1 and extra and unreadable:
+        # One outline found but not recognised, and the whole photo did recognise a
+        # card: most likely a close-up where the crop was the card's inner frame.
+        unreadable = []
     if not crops:
         result["unmatched"] = from_whole["unmatched"]
     result["unmatched"] += unreadable

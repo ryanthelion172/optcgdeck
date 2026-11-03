@@ -89,10 +89,14 @@ export interface ScanResult {
   raw?: unknown
 }
 
+/** 'deck': a photo of many cards laid out. 'single': a photo of one card, which can fill the frame. */
+export type ScanMode = 'deck' | 'single'
+
 /** Sends a photo to the backend, which finds each card and identifies it with CardSight. */
-export async function scanPhoto(photo: File): Promise<ScanResult> {
+export async function scanPhoto(photo: File, mode: ScanMode = 'deck'): Promise<ScanResult> {
   const body = new FormData()
   body.append('photo', photo)
+  body.append('mode', mode)
   const resp = await check(await fetch(`${API_BASE}/api/scan`, { method: 'POST', body }), 'Scan failed')
   const result: ScanResult = await resp.json()
   // Debugging aid: open the browser console (F12) to see what CardSight returned.

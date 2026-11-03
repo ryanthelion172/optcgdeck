@@ -24,3 +24,19 @@ def deck_photo(n: int = 6, size=(1200, 900), rotate_last: bool = False, backgrou
 
 def blank_photo() -> bytes:
     return cv2.imencode(".png", np.full((400, 300, 3), 128, np.uint8))[1].tobytes()
+
+
+def single_card_photo(fill: float = 0.85, size=(1600, 1200)) -> bytes:
+    """One card, centred, its height `fill` times the photo's; above 1 it runs off the edges."""
+    h, w = size
+    ch = int(h * fill)
+    cw = int(ch * 63 / 88)
+    card = np.full((ch, cw, 3), (30, 30, 200), np.uint8)  # red border
+    cv2.rectangle(card, (int(cw * 0.05), int(ch * 0.04)), (int(cw * 0.95), int(ch * 0.7)), (120, 160, 90), -1)  # art
+    cv2.rectangle(card, (int(cw * 0.08), int(ch * 0.62)), (int(cw * 0.92), int(ch * 0.95)), (230, 230, 230), -1)
+    img = np.full((h, w, 3), (60, 50, 40), np.uint8)
+    y0, x0 = (h - ch) // 2, (w - cw) // 2
+    ys, xs = max(0, y0), max(0, x0)
+    part = card[ys - y0 : ys - y0 + min(h - ys, ch), xs - x0 : xs - x0 + min(w - xs, cw)]
+    img[ys : ys + part.shape[0], xs : xs + part.shape[1]] = part
+    return cv2.imencode(".jpg", img)[1].tobytes()
