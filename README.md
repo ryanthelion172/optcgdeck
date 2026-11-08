@@ -8,9 +8,17 @@ in a Postgres database. It can be installed to your home screen as an app.
 
 **Create deck from photo:** lay out one copy of each card, take or upload a photo, check what was
 recognised, set the counts, and turn it into a deck. The backend finds each card in the photo with
-OpenCV, crops it, and identifies it with the [CardSight AI](https://cardsight.ai) API (one API call
-per card found). Photos work best with the cards flat, not overlapping, on a plain background that
-contrasts with them.
+OpenCV and crops it. Each crop is then identified, trying in order:
+
+1. **Set code:** reads the card number printed in the bottom-right corner (RapidOCR, runs locally).
+2. **Image match:** compares the card's art with every card's official image (runs locally; needs
+   the image index, see below).
+3. **CardSight:** the [CardSight AI](https://cardsight.ai) API, only for cards the first two
+   couldn't place.
+
+The scan results say which step found each card, and show the cut-out picture of any card that
+wasn't identified, with what the number reader and image match saw. Photos work best with the cards
+flat, not overlapping, on a plain background that contrasts with them.
 
 ## Project layout
 
@@ -37,6 +45,7 @@ pip install -r requirements-dev.txt
 cp .env.example .env               # add your CardSight key; DATABASE_URL already points at the local database
 python -m alembic upgrade head     # create the tables
 python scripts/import_cards.py     # load the cards (about 30 seconds)
+python scripts/build_image_index.py  # card images for scanning (first run downloads a few thousand images)
 uvicorn app.main:app --reload
 
 # Frontend (http://localhost:5173), in a second terminal
@@ -101,6 +110,12 @@ cd backend && python scripts/import_cards.py
 ```
 
 Then restart the backend so it picks up the new cards.
+Run `python scripts/build_image_index.py` afterwards too, so photo scanning can recognise the new
+cards by their art (it only downloads images it doesn't have yet).
+
+**Upgrading an existing setup:** scanning now uses `opencv-python` in place of
+`opencv-python-headless`. Run `pip uninstall -y opencv-python-headless` and then
+`pip install -r requirements-dev.txt`, since the two packages clash when both are installed.
 
 Card data comes from the [Punk Records](https://github.com/buhbbl/punk-records) dataset, which is
 generated from the official One Piece Card Game card list. Card images are downloaded by the

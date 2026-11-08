@@ -13,7 +13,7 @@ interface Props {
   onClose: () => void
 }
 
-type Row = { card: Card; count: number; confidence: string }
+type Row = { card: Card; count: number; confidence: string; via: string[] }
 
 export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
   const [mode, setMode] = useState<ScanMode>('deck')
@@ -56,7 +56,7 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
       if (id !== scanId.current) return
       const found = res.cards.flatMap((c) => {
         const card = lookup(c.id)
-        return card ? [{ card, count: c.count, confidence: c.confidence }] : []
+        return card ? [{ card, count: c.count, confidence: c.confidence, via: c.via ?? [] }] : []
       })
       setResult(res)
       setZoomed(null)
@@ -160,6 +160,9 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
           </label>
           <p className="text-sm">
             Leader: <span className="font-semibold">{leaderRow ? leaderRow.card.name : 'none found, pick one after'}</span>
+            {leaderRow && leaderRow.via.length > 0 && (
+              <span className="ml-2 text-xs text-slate-500">via {leaderRow.via.join(', ')}</span>
+            )}
             <span className="ml-3 text-slate-400">{total} main-deck cards</span>
           </p>
           <ul className="min-h-0 flex-1 divide-y divide-slate-800 overflow-y-auto rounded-lg bg-slate-950">
@@ -170,6 +173,7 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
                   <span className="block truncate text-sm">{r.card.name}</span>
                   <span className="text-xs text-slate-500">
                     {r.card.id}
+                    {r.via.length > 0 && <span className="ml-2">via {r.via.join(', ')}</span>}
                     {r.confidence !== 'High' && <span className="block text-amber-300">{r.confidence} confidence</span>}
                   </span>
                 </span>
@@ -192,6 +196,7 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
             ))}
             {mainRows.length === 0 && <li className="p-3 text-sm text-slate-400">No main-deck cards recognised.</li>}
           </ul>
+          {result.note && <p className="shrink-0 text-sm text-amber-300">{result.note}</p>}
           {result.unmatched.length > 0 && (
             <div className="max-h-80 shrink-0 overflow-y-auto text-sm text-amber-300">
               Couldn't match {result.unmatched.length} card{result.unmatched.length === 1 ? '' : 's'}; add{' '}
@@ -213,6 +218,7 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
                       </div>
                     )}
                     <span className="text-xs leading-tight">{u.label}</span>
+                    {u.detail && <span className="text-xs leading-tight text-slate-500">{u.detail}</span>}
                   </li>
                 ))}
               </ul>

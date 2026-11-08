@@ -226,3 +226,5 @@ frontend/dev-dist/
 *.local
 !frontend/src/lib/
 backend/.image-cache/
+backend/.image-index.npz
+backend/.image-index.tmp.npz
