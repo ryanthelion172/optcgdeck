@@ -11,6 +11,7 @@ and the whole photo, keeping whichever answer is more confident.
 
 from __future__ import annotations
 
+import base64
 import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -110,16 +111,28 @@ def match_card(card: dict, store) -> str | None:
     return None
 
 
-def build_result(detections: list[dict], store) -> dict:
-    """Groups detections into card counts plus a list of cards we couldn't match."""
+def data_url(jpeg: bytes) -> str:
+    """A JPEG as a data: URL, so the app can show it without another request."""
+    return "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")
+
+
+def build_result(detections: list[dict], store, images: list[bytes | None] | None = None) -> dict:
+    """Groups detections into card counts plus a list of cards we couldn't match.
+
+    `images`, if given, holds the crop each detection came from (same order), and
+    unmatched cards carry their crop so the app can show what was found.
+    """
     counts: dict[str, dict] = {}
     unmatched: list[dict] = []
-    for det in detections:
+    for i, det in enumerate(detections):
         card = det.get("card") or {}
         confidence = det.get("confidence") or "Low"
         card_id = match_card(card, store)
         if card_id is None:
-            unmatched.append({"label": label(card), "confidence": confidence})
+            entry = {"label": label(card), "confidence": confidence}
+            if images and images[i]:
+                entry["image"] = data_url(images[i])
+            unmatched.append(entry)
             continue
         entry = counts.setdefault(card_id, {"id": card_id, "count": 0, "confidence": confidence})
         entry["count"] += 1
@@ -161,10 +174,15 @@ def scan_single(image: bytes, filename: str, mime_type: str, store, identify: Id
         raise errors[0]
 
     # Prefer the crop on a tie: it's the card alone, straightened.
-    pick = best([d for d in (best(crop_found), best(whole)) if d])
-    result = build_result([pick] if pick else [], store)
+    crop_pick, whole_pick = best(crop_found), best(whole)
+    pick = best([d for d in (crop_pick, whole_pick) if d])
+    crop_jpeg = crops[0].jpeg if crops else None
+    result = build_result([pick] if pick else [], store, [crop_jpeg if pick is crop_pick else None])
     if not pick:
-        result["unmatched"] = [{"label": "The card in the photo (not recognised)", "confidence": "Low"}]
+        entry = {"label": "The card in the photo (not recognised)", "confidence": "Low"}
+        if crop_jpeg:
+            entry["image"] = data_url(crop_jpeg)
+        result["unmatched"] = [entry]
     result["detected"] = 1
     result["cardsFound"] = len(crops)
     result["raw"] = {
@@ -210,15 +228,18 @@ def scan(image: bytes, filename: str, mime_type: str, store, identify: Identify 
         if err.status == 503:
             raise err
 
-    detections, unreadable = [], []
+    detections, images, unreadable = [], [], []
     for i, (found, err) in enumerate(answers):
         if found:
             # Each crop holds one card; keep CardSight's most confident answer.
             detections.append(best(found))
+            images.append(crops[i].jpeg)
         else:
-            unreadable.append({"label": f"Card {i + 1} in the photo (not recognised)", "confidence": "Low"})
+            unreadable.append(
+                {"label": f"Card {i + 1} in the photo (not recognised)", "confidence": "Low", "image": data_url(crops[i].jpeg)}
+            )
 
-    result = build_result(detections, store)
+    result = build_result(detections, store, images)
     from_whole = build_result(whole, store)
     have = {c["id"] for c in result["cards"]}
     extra = [c for c in from_whole["cards"] if c["id"] not in have]

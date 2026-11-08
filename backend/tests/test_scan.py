@@ -135,7 +135,10 @@ def test_scan_identifies_each_card_found(monkeypatch):
     assert body["cardsFound"] == body["detected"] == 6
     assert {"id": "OP01-016", "count": 2, "confidence": "High"} in body["cards"]
     assert {"id": "OP01-001", "count": 1, "confidence": "High"} in body["cards"]
-    assert body["unmatched"] == [{"label": "Card 5 in the photo (not recognised)", "confidence": "Low"}]
+    assert len(body["unmatched"]) == 1
+    missed = body["unmatched"][0]
+    assert missed["label"] == "Card 5 in the photo (not recognised)" and missed["confidence"] == "Low"
+    assert missed["image"].startswith("data:image/jpeg;base64,")  # the crop, so the app can show it
     assert len(body["raw"]["cards"]) == 6 and len(body["raw"]["cards"][0]["corners"]) == 4
 
 
@@ -224,3 +227,16 @@ def test_deck_scan_of_one_close_up_card_uses_the_whole_photo(monkeypatch):
     body = TestClient(app).post("/api/scan", files={"photo": ("card.jpg", single_card_photo(), "image/jpeg")}).json()
     assert body["cards"] == [{"id": "OP01-016", "count": 1, "confidence": "High"}]
     assert body["unmatched"] == []
+
+
+def test_unrecognised_cards_carry_their_crop(monkeypatch):
+    """A crop CardSight read but we couldn't match, and a single-card crop it missed, both come back as images."""
+    monkeypatch.setattr(main, "identify", lambda image, filename, mime: [det(number="999")] if filename == "card-1.jpg" else [])
+    body = TestClient(app).post("/api/scan", files={"photo": ("deck.jpg", deck_photo(2), "image/jpeg")}).json()
+    assert [u["image"][:23] for u in body["unmatched"]] == ["data:image/jpeg;base64,"] * 2
+
+    monkeypatch.setattr(main, "identify", lambda *a: [])
+    body = TestClient(app).post(
+        "/api/scan", files={"photo": ("card.jpg", single_card_photo(), "image/jpeg")}, data={"mode": "single"}
+    ).json()
+    assert body["unmatched"][0]["image"].startswith("data:image/jpeg;base64,")
