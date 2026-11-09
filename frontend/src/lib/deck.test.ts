@@ -21,7 +21,6 @@ function card(id: string, over: Partial<Card> = {}): Card {
     pack: null,
     block: 1,
     image: '',
-    variants: [],
     ...over,
   }
 }

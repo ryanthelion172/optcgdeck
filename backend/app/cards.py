@@ -17,11 +17,13 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from .db import database_url, session_factory
-from .models import Card
+from .models import Card, CardPrinting, Set
 
 
 class CardStore:
     def __init__(self, cards: list[dict]) -> None:
+        # Base arts only: alternate arts stay on the backend (see load_printings).
+        cards = [{k: v for k, v in c.items() if k != "variants"} for c in cards]
         self.cards = sorted(cards, key=lambda c: c["id"])
         self.by_id: dict[str, dict] = {c["id"]: c for c in self.cards}
         self.json = json.dumps(self.cards, ensure_ascii=False, separators=(",", ":")).encode()
@@ -34,6 +36,12 @@ class CardStore:
 
 def load_cards(db: Session) -> list[dict]:
     return [card.to_dict() for card in db.scalars(select(Card).order_by(Card.id))]
+
+
+def load_printings(db: Session) -> list[dict]:
+    """Every printing (base and alternate arts) with its image, for photo scanning."""
+    rows = db.scalars(select(CardPrinting).order_by(CardPrinting.id))
+    return [{"id": p.id, "card_id": p.card_id, "is_base": p.is_base, "image": p.image_url} for p in rows]
 
 
 @lru_cache(maxsize=1)
@@ -53,17 +61,41 @@ def reload_store() -> None:
     _load_store.cache_clear()
 
 
-def upsert_cards(db: Session, cards: list[dict]) -> int:
-    """Adds new cards and updates existing ones. Never deletes a card.
-
-    Takes cards in the frontend shape (with "set"), as the import script builds them.
-    """
-    rows = [{**{k: v for k, v in c.items() if k != "set"}, "set_code": c["set"]} for c in cards]
+def _upsert(db: Session, model, rows: list[dict]) -> None:
+    """Inserts rows, updating any that already exist (matched on the primary key)."""
     for start in range(0, len(rows), 500):
         chunk = rows[start : start + 500]
-        stmt = insert(Card).values(chunk)
+        stmt = insert(model).values(chunk)
         updatable = {col: stmt.excluded[col] for col in chunk[0] if col != "id"}
         updatable["updated_at"] = func.now()
-        db.execute(stmt.on_conflict_do_update(index_elements=[Card.id], set_=updatable))
+        db.execute(stmt.on_conflict_do_update(index_elements=[model.id], set_=updatable))
+
+
+def upsert_cards(db: Session, cards: list[dict], sets: list[dict] | None = None) -> int:
+    """Adds new sets, cards and printings, and updates existing ones. Never deletes anything.
+
+    Takes cards in the shape the import script builds: the frontend shape (with
+    "set"), plus "set_id", the base art's "image", and "variants", the
+    alternate arts as [{"id": "OP01-001_p1", "image": "...", "set_id": "..."}].
+    `sets` are {"id", "code", "name", "kind"}.
+    """
+    if sets:
+        _upsert(db, Set, [{"id": s["id"], "code": s["code"], "name": s.get("name"), "kind": s.get("kind")} for s in sets])
+    card_fields = {c.key for c in Card.__table__.columns} - {"updated_at"}
+    rows, printings = [], []
+    for c in cards:
+        row = {k: v for k, v in c.items() if k in card_fields}
+        row["set_code"] = c["set"]
+        row.setdefault("set_id", None)
+        rows.append(row)
+        printings.append(
+            {"id": c["id"], "card_id": c["id"], "is_base": True, "set_id": row["set_id"], "image_url": c.get("image")}
+        )
+        for v in c.get("variants") or []:
+            printings.append(
+                {"id": v["id"], "card_id": c["id"], "is_base": False, "set_id": v.get("set_id"), "image_url": v.get("image")}
+            )
+    _upsert(db, Card, rows)
+    _upsert(db, CardPrinting, printings)
     db.commit()
     return len(rows)

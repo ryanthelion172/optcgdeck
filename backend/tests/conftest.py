@@ -18,6 +18,10 @@ from app.main import app
 SAMPLE_CARDS = json.loads((Path(__file__).parent / "sample_cards.json").read_text())
 TEST_URL = os.environ.get("TEST_DATABASE_URL")
 
+# The sample cards' packs, as rows for the `sets` table, and the cards pointing at them.
+SAMPLE_SETS = [{"id": f"test-{p}", "code": p} for p in sorted({c["pack"] for c in SAMPLE_CARDS if c["pack"]})]
+SAMPLE_DB_CARDS = [{**c, "set_id": f"test-{c['pack']}" if c["pack"] else None} for c in SAMPLE_CARDS]
+
 
 @pytest.fixture(autouse=True)
 def sample_store():
@@ -45,6 +49,6 @@ def database():
     command.downgrade(cfg, "base")
     command.upgrade(cfg, "head")  # also checks the migrations work
     with db.session_factory()() as session:
-        upsert_cards(session, SAMPLE_CARDS)
+        upsert_cards(session, SAMPLE_DB_CARDS, SAMPLE_SETS)
     yield db
     db.get_engine().dispose()

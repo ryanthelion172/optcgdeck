@@ -60,19 +60,25 @@ phone, run `npm run dev -- --host` and open the address it prints from a phone o
 ### Database (Postgres)
 
 The app needs a Postgres database. For development it runs on your own computer, so nothing is
-stored online. It holds three tables:
+stored online. It holds these tables:
 
-- `cards`: our own copy of the English card list, filled by `scripts/import_cards.py`.
-- `decks`: each deck's name and Leader.
+- `sets`: each pack or deck cards come in (code like `OP-01`, name, kind, release date).
+- `cards`: one row per card number (e.g. `OP01-016`) with its game text, filled by
+  `scripts/import_cards.py`. `set_id` points at the set it first came out in.
+- `card_printings`: every printed version of a card, the base art and each alternate art
+  (e.g. `OP01-016_p1`), with its image. Photo scanning uses these; the app is only sent base arts.
+- `users`: accounts (email, display name, password hash). Sign-up and sign-in aren't built yet.
+- `decks`: each deck's name, Leader and owner.
 - `deck_cards`: how many copies of each card a deck has.
 
 Decks point at cards with foreign keys, so they depend only on our copy, never on the outside
 source. The import adds new cards and updates changed ones but never deletes a card, and the
 database refuses to delete a card that a deck uses.
 
-Only what the app needs is stored. There are no accounts, names or emails. Each browser makes a
-random "owner key" (the only thing the app keeps in the browser), and the database keeps only a
-hash of it, so your decks show up in the browser that made them.
+A deck's owner is a user account (`owner_id`), or, for decks made without an account, an "owner
+key": each browser makes a random key (the only thing the app keeps in the browser), and the
+database keeps only a hash of it, so your decks show up in the browser that made them. Until
+accounts are built, every deck uses an owner key, and no names or emails are stored.
 
 1. Start Postgres. The easiest way is Docker: `docker compose up -d` from the repo root starts it
    in the background and keeps your data between restarts (`docker compose down` stops it).
@@ -116,6 +122,8 @@ cards by their art (it only downloads images it doesn't have yet).
 **Upgrading an existing setup:** scanning now uses `opencv-python` in place of
 `opencv-python-headless`. Run `pip uninstall -y opencv-python-headless` and then
 `pip install -r requirements-dev.txt`, since the two packages clash when both are installed.
+Then run `python -m alembic upgrade head` and `python scripts/import_cards.py` to move to the new
+tables (sets and card printings) and fill in the sets.
 
 Card data comes from the [Punk Records](https://github.com/buhbbl/punk-records) dataset, which is
 generated from the official One Piece Card Game card list. Card images are downloaded by the

@@ -27,22 +27,19 @@ from dotenv import load_dotenv
 BACKEND = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND))
 
-from app.cards import load_cards  # noqa: E402
+from app.cards import load_printings  # noqa: E402
 from app.db import database_url, session_factory  # noqa: E402
 from app.images import close_client, fetch_image  # noqa: E402
 from app.match import INDEX_FILE, ImageIndex, fingerprint  # noqa: E402
 
 
-def images_to_index(cards: list[dict], base_only: bool) -> list[tuple[str, dict]]:
+def images_to_index(printings: list[dict], base_only: bool) -> list[tuple[str, dict]]:
     """(card id, image to fetch) pairs. Alternate arts count as their base card."""
-    jobs = []
-    for card in cards:
-        jobs.append((card["id"], {"id": card["id"], "image": card.get("image")}))
-        if not base_only:
-            for variant in card.get("variants") or []:
-                if variant.get("id") and variant.get("image"):
-                    jobs.append((card["id"], {"id": variant["id"], "image": variant["image"]}))
-    return jobs
+    return [
+        (p["card_id"], {"id": p["id"], "image": p["image"]})
+        for p in printings
+        if p["is_base"] or (not base_only and p["image"])
+    ]
 
 
 async def fetch_all(jobs: list[tuple[str, dict]]) -> list[tuple[str, Path | None]]:
@@ -72,12 +69,12 @@ def main() -> int:
         print("Set DATABASE_URL in backend/.env first.", file=sys.stderr)
         return 1
     with session_factory()() as db:
-        cards = load_cards(db)
-    if not cards:
+        printings = load_printings(db)
+    if not printings:
         print("No cards in the database. Run scripts/import_cards.py first.", file=sys.stderr)
         return 1
 
-    jobs = images_to_index(cards, args.base_only)
+    jobs = images_to_index(printings, args.base_only)
     print(f"Getting {len(jobs)} card images (cached ones are reused)...")
     results = asyncio.run(fetch_all(jobs))
 
