@@ -197,7 +197,7 @@ def recognise_card(img: np.ndarray, store, index: ImageIndex | None) -> tuple[di
     if found := read(upside_down=False):
         return found, seen
     if index is None:
-        seen["imageMatch"] = "no image index (run scripts/build_image_index.py)"
+        seen["imageMatch"] = "image match off: run scripts/build_image_index.py"
     elif m := index.best(img):
         seen["imageMatch"] = {
             "card": m.card_id, "score": round(m.score, 3), "confidence": m.confidence, "runnersUp": m.runners_up
@@ -220,6 +220,8 @@ def describe(seen: dict) -> str:
     m = seen.get("imageMatch")
     if isinstance(m, dict):
         parts.append(f"closest art {m['card']} ({m['score']:.2f})")
+    elif m:
+        parts.append(m)  # e.g. the image index hasn't been built
     return "; ".join(parts)
 
 
