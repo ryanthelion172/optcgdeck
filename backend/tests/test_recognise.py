@@ -131,3 +131,9 @@ def test_reads_the_printed_card_number():
     cv2.putText(card, "OP01-016 R", (int(w * 0.6), int(h * 0.97)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (20, 20, 20), 1, cv2.LINE_AA)
     assert read_number(card, store)[0] == "OP01-016"
     assert read_number(cv2.rotate(card, cv2.ROTATE_180), store, upside_down=True)[0] == "OP01-016"
+
+
+def test_unplaced_cards_say_when_the_image_index_is_missing():
+    assert scan.describe({"setCodeRead": "", "imageMatch": "image match off: run scripts/build_image_index.py"}) == (
+        "No number read; image match off: run scripts/build_image_index.py"
+    )
