@@ -198,13 +198,10 @@ def card_shapes(gray: np.ndarray, close: int, low: int, high: int, max_area: flo
             continue
         if rw * rh < MIN_IN_VIEW * MIN_AREA * photo_area:
             continue  # too small to hold a card, even with part of it off the photo
-        whole = cv2.boxPoints(rect)
         box = complete(front_card(contour, rect, support), w, h)
         if box is None:
             continue
-        if np.array_equal(box, whole):
-            box = corners_of(contour, whole)
-        rw, rh = side_lengths(box)
+        rw, rh = np.linalg.norm(box[1] - box[0]), np.linalg.norm(box[2] - box[1])
         area = rw * rh
         if not MIN_AREA * photo_area <= area <= max_area * photo_area:
             continue
@@ -300,30 +297,6 @@ def front_card(contour: np.ndarray, rect, support: np.ndarray) -> np.ndarray:
     # If that leaves more than one: each card in a stack is laid on the one before, so the
     # front card is usually the last laid, the lowest and furthest right.
     return max(fronts, key=lambda c: float(c[:, 0].mean() + c[:, 1].mean()))
-
-
-def corners_of(contour: np.ndarray, box: np.ndarray) -> np.ndarray:
-    """The outline's own four corners, when it has four: a card photographed at an angle.
-
-    Seen at an angle a card is a slanted four-sided shape, not a rectangle, and
-    the smallest rectangle around it takes in background at two corners and cuts
-    the crop askew. When the outline simplifies to four corners that cover most
-    of the rectangle, those are used instead.
-    """
-    hull = cv2.convexHull(contour)
-    quad = cv2.approxPolyDP(hull, 0.02 * cv2.arcLength(hull, True), True)
-    if len(quad) != 4 or not cv2.isContourConvex(quad):
-        return box
-    if cv2.contourArea(quad) < 0.85 * cv2.contourArea(box):
-        return box
-    return quad.reshape(4, 2).astype(np.float32)
-
-
-def side_lengths(box: np.ndarray) -> tuple[float, float]:
-    """A four-cornered box's width and height, each the mean of the two opposite sides."""
-    a = (np.linalg.norm(box[1] - box[0]) + np.linalg.norm(box[3] - box[2])) / 2
-    b = (np.linalg.norm(box[2] - box[1]) + np.linalg.norm(box[0] - box[3])) / 2
-    return float(a), float(b)
 
 
 def close_at_edge(contour: np.ndarray, w: int, h: int) -> np.ndarray:
