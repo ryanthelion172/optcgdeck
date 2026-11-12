@@ -146,3 +146,18 @@ def test_rectangle_search_skips_a_rectangle_straddling_two_cards():
         cv2.rectangle(gray, (x, y), (x + cw, y + ch), 200, -1)
     found = [np.array([[x, y], [x + cw, y], [x + cw, y + ch], [x, y + ch]], np.float32) for x, y in tops]
     assert card_sized_rectangles(cv2.GaussianBlur(gray, (5, 5), 0), found) == []
+
+
+def test_no_cards_made_up_on_a_busy_background():
+    """On noise or a patterned mat edges are everywhere; the rectangle search mustn't box empty patches."""
+    img = cv2.imdecode(np.frombuffer(deck_photo(8), np.uint8), cv2.IMREAD_COLOR)
+    table = (img == img[5, 5]).all(axis=2)
+    noise = cv2.GaussianBlur((np.random.default_rng(0).random(img.shape[:2]) * 255).astype(np.uint8), (3, 3), 0)
+    img[table] = np.stack([noise] * 3, axis=2)[table]
+    assert len(find_cards(cv2.imencode(".jpg", img)[1].tobytes())) == 8
+
+
+def test_tiny_photos_are_not_blown_up_past_their_edges():
+    img = cv2.imdecode(np.frombuffer(deck_photo(8), np.uint8), cv2.IMREAD_COLOR)
+    tiny = cv2.resize(img, (200, 150), interpolation=cv2.INTER_AREA)
+    assert len(find_cards(cv2.imencode(".png", tiny)[1].tobytes())) == 8

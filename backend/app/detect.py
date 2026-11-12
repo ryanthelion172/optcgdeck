@@ -21,6 +21,7 @@ SINGLE_MAX_AREA = 0.98  # a photo of one card can be almost all card
 # Photos are resized so the longest side is this, up or down, before finding outlines.
 # Big enough that the 1-2 pixel steps between fanned cards in a deck builder screenshot still show.
 DETECT_SIZE = 2000
+SMALL_DETECT_SIZE = 1200  # images smaller than this are brought up to it, not to DETECT_SIZE
 CROP_SIZE = (630, 880)  # width, height of each cropped card
 MAX_CARDS = 60
 
@@ -63,7 +64,9 @@ def find_outlines(img: np.ndarray, single: bool = False) -> list[np.ndarray]:
     """
     h, w = img.shape[:2]
     # A fixed working size keeps edge widths and gaps between cards comparable for any photo.
-    scale = DETECT_SIZE / max(h, w)
+    # A small image is only brought up to SMALL_DETECT_SIZE: blown up further, its edges blur
+    # too much to find.
+    scale = (DETECT_SIZE if max(h, w) >= SMALL_DETECT_SIZE else SMALL_DETECT_SIZE) / max(h, w)
     interpolation = cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC
     small = cv2.resize(img, (round(w * scale), round(h * scale)), interpolation=interpolation)
     blur = cv2.GaussianBlur(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY), (5, 5), 0)
@@ -91,6 +94,7 @@ SIDE_EDGE = 5  # pixels (at DETECT_SIZE): how far an edge may be off a rectangle
 MIN_SIDE = 0.5  # share of every side that must lie on an edge
 MIN_SIDES = 0.7  # share of all four sides, together, that must lie on edges
 MAX_INNER_LINE = 0.85  # an edge running this much of a card's height inside it is another card's side
+STANDS_OUT = 0.25  # how much more of each side must be edge than of the lines running across the inside
 OVERLAP = 0.3  # a rectangle overlapping a card already found by this share of the smaller is the same card
 
 
@@ -104,7 +108,8 @@ def card_sized_rectangles(gray: np.ndarray, found: list[np.ndarray]) -> list[np.
     running the same way (vertical for the left and right sides, horizontal for
     the top and bottom), the best-scoring places are kept, and any overlapping a
     card already found is dropped. A rectangle with an edge running down its
-    middle straddles two cards, so it is dropped too.
+    middle straddles two cards, so it is dropped too, as is one whose sides
+    don't stand out from its inside (a busy surface, with edges everywhere).
 
     Needs two cards found already, to know the size and where the deck lies; a
     rectangle more than a card's size away from every card found is something
@@ -140,10 +145,18 @@ def card_sized_rectangles(gray: np.ndarray, found: list[np.ndarray]) -> list[np.
         total, weakest = score.mean(axis=0), score.min(axis=0)
         near = np.ones((max(3, ch // 4) | 1, max(3, cw // 4) | 1), np.uint8)
         best_nearby = total >= cv2.dilate(total, near)
-        margin = round(cw * 0.12)
+        margin_x, margin_y = round(cw * 0.12), round(ch * 0.12)
         for y, x in zip(*np.nonzero(best_nearby & (weakest >= MIN_SIDE) & (total >= MIN_SIDES))):
-            if down[y, x + margin : x + cw - margin].max() < MAX_INNER_LINE:
-                candidates.append((float(total[y, x]), (int(x), int(y), cw, ch)))
+            inside_columns = down[y, x + margin_x : x + cw - margin_x]
+            if inside_columns.max() >= MAX_INNER_LINE:
+                continue  # straddles two cards
+            # A card's sides are lines on a calmer face; on a busy surface (noise, a patterned
+            # mat) edges are everywhere, so any rectangle's sides would score well.
+            inside_rows = across[y + margin_y : y + ch - margin_y, x]
+            left, right, top, bottom = score[:, y, x]
+            if min(left, right) - inside_columns.mean() < STANDS_OUT or min(top, bottom) - inside_rows.mean() < STANDS_OUT:
+                continue
+            candidates.append((float(total[y, x]), (int(x), int(y), cw, ch)))
 
     taken = [cv2.boundingRect(b.astype(np.float32)) for b in found]
     candidates.sort(reverse=True)
