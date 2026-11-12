@@ -62,3 +62,43 @@ def test_single_mode_finds_a_card_running_off_the_photo():
 
 def test_single_mode_returns_at_most_one_card():
     assert len(find_cards(deck_photo(6), single=True)) == 1
+
+
+def cut_photo(photo: bytes, keep_h: int | None = None, keep_w: int | None = None) -> tuple[bytes, tuple[int, int]]:
+    """The photo cut short at the bottom and/or right, as if the camera missed part of the table."""
+    img = cv2.imdecode(np.frombuffer(photo, np.uint8), cv2.IMREAD_COLOR)
+    img = img[: keep_h or img.shape[0], : keep_w or img.shape[1]]
+    return cv2.imencode(".jpg", img)[1].tobytes(), img.shape[:2]
+
+
+def card_px(card, size) -> tuple[float, float]:
+    """Width and height of a found card, in pixels of the photo."""
+    h, w = size
+    corners = np.array(card.corners) * [w, h]
+    return float(np.linalg.norm(corners[1] - corners[0])), float(np.linalg.norm(corners[3] - corners[0]))
+
+
+def test_finds_cards_running_off_the_bottom_of_the_photo():
+    # deck_photo's second row starts at y=310 and its cards are 210 tall: keep 60% of them.
+    photo, size = cut_photo(deck_photo(8), keep_h=310 + 126)
+    cards = find_cards(photo)
+    assert len(cards) == 8
+    for card in cards[4:]:
+        assert max(y for _, y in card.corners) > 1  # rebuilt past the photo's edge
+        assert card_px(card, size) == pytest.approx((150, 210), abs=8)  # to a full card
+
+
+def test_finds_cards_running_off_the_side_of_the_photo():
+    # The fourth column starts at x=640 and its cards are 150 wide: keep 70% of them.
+    photo, size = cut_photo(deck_photo(8), keep_w=640 + 105)
+    cards = find_cards(photo)
+    assert len(cards) == 8
+    for card in (cards[3], cards[7]):
+        assert max(x for x, _ in card.corners) > 1
+        assert card_px(card, size) == pytest.approx((150, 210), abs=8)
+
+
+def test_ignores_a_sliver_of_a_card_at_the_edge():
+    # Only 20% of the second row is in the photo: too little to be worth a guess.
+    photo, _ = cut_photo(deck_photo(8), keep_h=310 + 42)
+    assert len(find_cards(photo)) == 4

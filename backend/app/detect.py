@@ -82,7 +82,11 @@ def find_outlines(img: np.ndarray, single: bool = False) -> list[np.ndarray]:
 
 
 def card_shapes(gray: np.ndarray, close: int, low: int, high: int, max_area: float = MAX_AREA) -> list[np.ndarray]:
-    """Every outline in the picture that has a card's shape."""
+    """Every outline in the picture that has a card's shape.
+
+    A card running off the photo is rebuilt to its full size (see `complete`),
+    so the box can reach past the photo's edge.
+    """
     edges = cv2.Canny(gray, low, high)
     if close:
         # Close small gaps so each card's edge is one unbroken outline.
@@ -90,24 +94,110 @@ def card_shapes(gray: np.ndarray, close: int, low: int, high: int, max_area: flo
     # RETR_LIST also returns outlines inside other outlines, e.g. cards inside a decklist panel.
     contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
-    photo_area = gray.shape[0] * gray.shape[1]
+    h, w = gray.shape[:2]
+    photo_area = h * w
     found = []
     for contour in contours:
+        contour = close_at_edge(contour, w, h)
         rect = cv2.minAreaRect(contour)
         rw, rh = rect[1]
         if min(rw, rh) < 1:
             continue
+        # The outline should fill its rectangle (ignoring small dents where an edge was faint),
+        # which rules out L-shapes and odd clusters.
+        if cv2.contourArea(cv2.convexHull(contour)) < 0.85 * rw * rh:
+            continue
+        box = complete(cv2.boxPoints(rect), w, h)
+        if box is None:
+            continue
+        rw, rh = np.linalg.norm(box[1] - box[0]), np.linalg.norm(box[2] - box[1])
         area = rw * rh
         if not MIN_AREA * photo_area <= area <= max_area * photo_area:
             continue
         if not RATIO_RANGE[0] <= max(rw, rh) / min(rw, rh) <= RATIO_RANGE[1]:
             continue
-        # The outline should fill its rectangle (ignoring small dents where an edge was faint),
-        # which rules out L-shapes and odd clusters.
-        if cv2.contourArea(cv2.convexHull(contour)) < 0.85 * area:
-            continue
-        found.append(cv2.boxPoints(rect))
+        found.append(box)
     return found
+
+
+def close_at_edge(contour: np.ndarray, w: int, h: int) -> np.ndarray:
+    """Closes an outline left open where it runs off the photo.
+
+    Canny draws no line along the photo's own edge, so a card running off the photo
+    has an outline open on that side, often with one of its sides broken off short
+    too. Adding the points where the outline's span meets the photo's edge closes it,
+    so it fills its rectangle like a whole card's outline does.
+    """
+    pts = contour.reshape(-1, 2)
+    x0, y0 = pts.min(axis=0)
+    x1, y1 = pts.max(axis=0)
+    extra = []
+    if x0 <= EDGE_MARGIN:
+        extra += [(0, y0), (0, y1)]
+    if x1 >= w - 1 - EDGE_MARGIN:
+        extra += [(w - 1, y0), (w - 1, y1)]
+    if y0 <= EDGE_MARGIN:
+        extra += [(x0, 0), (x1, 0)]
+    if y1 >= h - 1 - EDGE_MARGIN:
+        extra += [(x0, h - 1), (x1, h - 1)]
+    if not extra:
+        return contour
+    return np.concatenate([pts, np.array(extra, dtype=pts.dtype)]).reshape(-1, 1, 2)
+
+
+EDGE_MARGIN = 3  # pixels (at DETECT_SIZE): a box this close to the photo's edge is cut off by it
+MIN_IN_VIEW = 0.4  # a card cut off by the photo's edge needs this share of it in the photo
+SQUARE_TOLERANCE = 5  # degrees: how far a cut-off box may be turned from the photo's edges
+
+
+def complete(box: np.ndarray, w: int, h: int) -> np.ndarray | None:
+    """Rebuilds a card that runs off one edge of the photo to its full size.
+
+    The visible part is too short for a card's shape, so it would fail the shape
+    check. Its side along the photo's edge is whole, though, which gives the card's
+    size: the box is stretched past the edge to a full card. The card is taken to be
+    upright in the photo (as cards are usually laid out) unless the visible part is
+    already deeper than an upright card would be, which means the card lies sideways.
+
+    Boxes inside the photo come back as they are, as do boxes touching two or more
+    edges or turned at an angle, since their full size can't be told. Returns None
+    for a sliver too small to be a card.
+    """
+    x0, y0 = box.min(axis=0)
+    x1, y1 = box.max(axis=0)
+    cut = {
+        "left": x0 <= EDGE_MARGIN,
+        "right": x1 >= w - 1 - EDGE_MARGIN,
+        "top": y0 <= EDGE_MARGIN,
+        "bottom": y1 >= h - 1 - EDGE_MARGIN,
+    }
+    sides = [side for side, hit in cut.items() if hit]
+    if len(sides) != 1:
+        return box
+    side = sides[0]
+    angle = np.degrees(np.arctan2(*(box[1] - box[0])[::-1])) % 90
+    if min(angle, 90 - angle) > SQUARE_TOLERANCE:
+        return box
+
+    horizontal = side in ("top", "bottom")  # the photo's edge the card runs off
+    along, depth = (x1 - x0, y1 - y0) if horizontal else (y1 - y0, x1 - x0)
+    # Along a top or bottom edge an upright card shows its width; along a side edge, its height.
+    upright, sideways = (along * CARD_RATIO, along / CARD_RATIO) if horizontal else (along / CARD_RATIO, along * CARD_RATIO)
+    full = upright if upright >= depth * 0.97 else sideways
+    if full < depth * 0.97:
+        return box  # deeper than any card this wide: not a cut-off card, leave it to the shape check
+    if depth / full < MIN_IN_VIEW:
+        return None
+    full = max(full, depth)
+    if side == "left":
+        x0 = x1 - full
+    elif side == "right":
+        x1 = x0 + full
+    elif side == "top":
+        y0 = y1 - full
+    else:
+        y1 = y0 + full
+    return np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=np.float32)
 
 
 def similar_size(boxes: list[np.ndarray]) -> list[np.ndarray]:
