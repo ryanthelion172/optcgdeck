@@ -13,7 +13,7 @@ interface Props {
   onClose: () => void
 }
 
-type Row = { card: Card; count: number; confidence: string }
+type Row = { card: Card; count: number; confidence: string; via: string[] }
 
 export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
   const [mode, setMode] = useState<ScanMode>('deck')
@@ -24,6 +24,8 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
   const [result, setResult] = useState<ScanResult | null>(null)
   const [rows, setRows] = useState<Row[]>([])
   const [name, setName] = useState('')
+  // The unmatched card shown large, if any.
+  const [zoomed, setZoomed] = useState<number | null>(null)
   // Counts scans, so a slow answer for an older photo is ignored.
   const scanId = useRef(0)
 
@@ -54,9 +56,10 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
       if (id !== scanId.current) return
       const found = res.cards.flatMap((c) => {
         const card = lookup(c.id)
-        return card ? [{ card, count: c.count, confidence: c.confidence }] : []
+        return card ? [{ card, count: c.count, confidence: c.confidence, via: c.via ?? [] }] : []
       })
       setResult(res)
+      setZoomed(null)
       setRows(found)
       setName(defaultDeckName(found.find((r) => r.card.category === 'Leader')?.card, deckNames))
     } catch (e) {
@@ -157,6 +160,9 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
           </label>
           <p className="text-sm">
             Leader: <span className="font-semibold">{leaderRow ? leaderRow.card.name : 'none found, pick one after'}</span>
+            {leaderRow && leaderRow.via.length > 0 && (
+              <span className="ml-2 text-xs text-slate-500">via {leaderRow.via.join(', ')}</span>
+            )}
             <span className="ml-3 text-slate-400">{total} main-deck cards</span>
           </p>
           <ul className="min-h-0 flex-1 divide-y divide-slate-800 overflow-y-auto rounded-lg bg-slate-950">
@@ -167,6 +173,7 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
                   <span className="block truncate text-sm">{r.card.name}</span>
                   <span className="text-xs text-slate-500">
                     {r.card.id}
+                    {r.via.length > 0 && <span className="ml-2">via {r.via.join(', ')}</span>}
                     {r.confidence !== 'High' && <span className="block text-amber-300">{r.confidence} confidence</span>}
                   </span>
                 </span>
@@ -189,13 +196,30 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
             ))}
             {mainRows.length === 0 && <li className="p-3 text-sm text-slate-400">No main-deck cards recognised.</li>}
           </ul>
+          {result.note && <p className="shrink-0 text-sm text-amber-300">{result.note}</p>}
           {result.unmatched.length > 0 && (
-            <div className="max-h-32 shrink-0 overflow-y-auto text-sm text-amber-300">
+            <div className="max-h-80 shrink-0 overflow-y-auto text-sm text-amber-300">
               Couldn't match {result.unmatched.length} card{result.unmatched.length === 1 ? '' : 's'}; add{' '}
               {result.unmatched.length === 1 ? 'it' : 'them'} by hand:
-              <ul className="mt-1 list-disc pl-5 text-slate-400">
+              <ul className="mt-2 flex flex-wrap gap-3 text-slate-400">
                 {result.unmatched.map((u, i) => (
-                  <li key={i}>{u.label}</li>
+                  <li key={i} className={`flex flex-col gap-1 ${zoomed === i ? 'w-64' : 'w-24'}`}>
+                    {u.image ? (
+                      <button type="button" onClick={() => setZoomed(zoomed === i ? null : i)} title="Click to enlarge">
+                        <img
+                          src={u.image}
+                          alt={`What the scan cut out for: ${u.label}`}
+                          className="aspect-[63/88] w-full rounded border border-slate-700 bg-slate-950 object-contain"
+                        />
+                      </button>
+                    ) : (
+                      <div className="flex aspect-[63/88] w-full items-center justify-center rounded border border-dashed border-slate-700 p-1 text-center text-xs text-slate-500">
+                        No card outline found
+                      </div>
+                    )}
+                    <span className="text-xs leading-tight">{u.label}</span>
+                    {u.detail && <span className="text-xs leading-tight text-slate-500">{u.detail}</span>}
+                  </li>
                 ))}
               </ul>
             </div>

@@ -81,8 +81,15 @@ export async function deleteDeck(id: string): Promise<void> {
 
 export interface ScanResult {
   detected: number
-  cards: { id: string; count: number; confidence: 'High' | 'Medium' | 'Low' }[]
-  unmatched: { label: string; confidence: string }[]
+  /** `via`: how the card was identified: 'set code', 'image match' or 'CardSight'. */
+  cards: { id: string; count: number; confidence: 'High' | 'Medium' | 'Low'; via?: string[] }[]
+  /**
+   * Cards found but not identified. `image` is the crop the square detection cut out, as a data: URL;
+   * `detail` says what the number reader and image match saw.
+   */
+  unmatched: { label: string; confidence: string; image?: string; detail?: string }[]
+  /** A problem that didn't stop the scan, e.g. CardSight couldn't be reached. */
+  note?: string
   /** How many cards OpenCV found in the photo (0 means the whole photo was sent instead). */
   cardsFound?: number
   /** CardSight's raw answers, per card found, for debugging. */

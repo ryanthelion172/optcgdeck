@@ -12,6 +12,12 @@ from .photos import blank_photo, deck_photo, single_card_photo
 store = CardStore(SAMPLE_CARDS)
 
 
+@pytest.fixture(autouse=True)
+def cardsight_only(monkeypatch):
+    """These tests are about the CardSight path, so the local steps find nothing."""
+    monkeypatch.setattr(scan, "recognise_card", lambda img, store, index: (None, {}))
+
+
 def det(name=None, number=None, release=None, confidence="High"):
     card = {k: v for k, v in {"name": name, "number": number, "releaseName": release}.items() if v}
     return {"confidence": confidence, "card": card}
@@ -43,8 +49,8 @@ def test_build_result_groups_copies_and_keeps_unmatched():
         store,
     )
     assert result["detected"] == 4
-    assert {"id": "OP01-016", "count": 2, "confidence": "Low"} in result["cards"]
-    assert {"id": "OP01-001", "count": 1, "confidence": "High"} in result["cards"]
+    assert {"id": "OP01-016", "count": 2, "confidence": "Low", "via": ["CardSight"]} in result["cards"]
+    assert {"id": "OP01-001", "count": 1, "confidence": "High", "via": ["CardSight"]} in result["cards"]
     assert result["unmatched"] == [{"label": "Mystery Card · 999", "confidence": "High"}]
 
 
@@ -87,7 +93,7 @@ def test_scan_sends_the_whole_photo_when_no_cards_are_found(monkeypatch):
     monkeypatch.setattr(main, "identify", fake_identify)
     resp = TestClient(app).post("/api/scan", files={"photo": ("deck.jpg", photo, "image/jpeg")})
     assert resp.status_code == 200
-    assert resp.json()["cards"] == [{"id": "OP01-016", "count": 2, "confidence": "High"}]
+    assert resp.json()["cards"] == [{"id": "OP01-016", "count": 2, "confidence": "High", "via": ["CardSight"]}]
     assert calls == [(photo, "deck.jpg", "image/jpeg")]
 
 
@@ -133,9 +139,12 @@ def test_scan_identifies_each_card_found(monkeypatch):
     body = resp.json()
     assert len(calls) == 6 and all(m == "image/jpeg" for _, m in calls)
     assert body["cardsFound"] == body["detected"] == 6
-    assert {"id": "OP01-016", "count": 2, "confidence": "High"} in body["cards"]
-    assert {"id": "OP01-001", "count": 1, "confidence": "High"} in body["cards"]
-    assert body["unmatched"] == [{"label": "Card 5 in the photo (not recognised)", "confidence": "Low"}]
+    assert {"id": "OP01-016", "count": 2, "confidence": "High", "via": ["CardSight"]} in body["cards"]
+    assert {"id": "OP01-001", "count": 1, "confidence": "High", "via": ["CardSight"]} in body["cards"]
+    assert len(body["unmatched"]) == 1
+    missed = body["unmatched"][0]
+    assert missed["label"] == "Card 5 in the photo (not recognised)" and missed["confidence"] == "Low"
+    assert missed["image"].startswith("data:image/jpeg;base64,")  # the crop, so the app can show it
     assert len(body["raw"]["cards"]) == 6 and len(body["raw"]["cards"][0]["corners"]) == 4
 
 
@@ -149,7 +158,7 @@ def test_scan_keeps_going_when_some_cards_fail(monkeypatch):
 
     monkeypatch.setattr(main, "identify", flaky)
     body = TestClient(app).post("/api/scan", files={"photo": ("d.jpg", deck_photo(3), "image/jpeg")}).json()
-    assert body["cards"] == [{"id": "OP01-016", "count": 2, "confidence": "High"}]
+    assert body["cards"] == [{"id": "OP01-016", "count": 2, "confidence": "High", "via": ["CardSight"]}]
     assert body["unmatched"][0]["label"].startswith("Card 2")
 
 
@@ -162,8 +171,8 @@ def test_whole_photo_adds_cards_the_crops_missed(monkeypatch):
     monkeypatch.setattr(main, "identify", fake)
     body = TestClient(app).post("/api/scan", files={"photo": ("deck.jpg", deck_photo(2), "image/jpeg")}).json()
     assert body["cards"] == [
-        {"id": "OP01-016", "count": 2, "confidence": "High"},  # from the two crops
-        {"id": "OP01-001", "count": 1, "confidence": "High"},  # only the whole photo saw it
+        {"id": "OP01-016", "count": 2, "confidence": "High", "via": ["CardSight"]},  # from the two crops
+        {"id": "OP01-001", "count": 1, "confidence": "High", "via": ["CardSight"]},  # only the whole photo saw it
     ]
 
 
@@ -182,7 +191,7 @@ def test_single_card_scan_keeps_the_most_confident_answer(monkeypatch):
     )
     body = resp.json()
     assert sorted(calls) == ["card-1.jpg", "card.jpg"]
-    assert body["cards"] == [{"id": "OP01-016", "count": 1, "confidence": "Medium"}]
+    assert body["cards"] == [{"id": "OP01-016", "count": 1, "confidence": "Medium", "via": ["CardSight"]}]
     assert body["detected"] == body["cardsFound"] == 1
     assert body["unmatched"] == []
 
@@ -195,7 +204,7 @@ def test_single_card_scan_falls_back_to_the_whole_photo(monkeypatch):
     body = TestClient(app).post(
         "/api/scan", files={"photo": ("card.jpg", single_card_photo(), "image/jpeg")}, data={"mode": "single"}
     ).json()
-    assert body["cards"] == [{"id": "OP01-016", "count": 1, "confidence": "High"}]
+    assert body["cards"] == [{"id": "OP01-016", "count": 1, "confidence": "High", "via": ["CardSight"]}]
 
 
 def test_single_card_scan_reports_an_unrecognised_card(monkeypatch):
@@ -222,5 +231,18 @@ def test_deck_scan_of_one_close_up_card_uses_the_whole_photo(monkeypatch):
 
     monkeypatch.setattr(main, "identify", fake)
     body = TestClient(app).post("/api/scan", files={"photo": ("card.jpg", single_card_photo(), "image/jpeg")}).json()
-    assert body["cards"] == [{"id": "OP01-016", "count": 1, "confidence": "High"}]
+    assert body["cards"] == [{"id": "OP01-016", "count": 1, "confidence": "High", "via": ["CardSight"]}]
     assert body["unmatched"] == []
+
+
+def test_unrecognised_cards_carry_their_crop(monkeypatch):
+    """A crop CardSight read but we couldn't match, and a single-card crop it missed, both come back as images."""
+    monkeypatch.setattr(main, "identify", lambda image, filename, mime: [det(number="999")] if filename == "card-1.jpg" else [])
+    body = TestClient(app).post("/api/scan", files={"photo": ("deck.jpg", deck_photo(2), "image/jpeg")}).json()
+    assert [u["image"][:23] for u in body["unmatched"]] == ["data:image/jpeg;base64,"] * 2
+
+    monkeypatch.setattr(main, "identify", lambda *a: [])
+    body = TestClient(app).post(
+        "/api/scan", files={"photo": ("card.jpg", single_card_photo(), "image/jpeg")}, data={"mode": "single"}
+    ).json()
+    assert body["unmatched"][0]["image"].startswith("data:image/jpeg;base64,")

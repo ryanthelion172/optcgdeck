@@ -55,7 +55,7 @@ def test_only_the_key_hash_is_stored(client):
 
     put(client, str(uuid.uuid4()), {"name": "Hash check", "cards": {}})
     with get_engine().connect() as conn:
-        stored = conn.execute(text("select owner_hash from decks")).scalars().all()
+        stored = conn.execute(text("select owner_hash from decks where owner_id is null")).scalars().all()
     assert KEY_A not in stored
     assert all(len(h) == 64 for h in stored)
 

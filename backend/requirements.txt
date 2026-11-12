@@ -7,5 +7,7 @@ cardsightai==2.1.0
 sqlalchemy==2.0.41
 psycopg[binary]==3.2.9
 alembic==1.16.1
-opencv-python-headless==4.10.0.84
+# opencv-python (not -headless): rapidocr needs it, and two OpenCV packages clash.
+opencv-python==4.10.0.84
+rapidocr_onnxruntime==1.2.3
 numpy==2.1.3

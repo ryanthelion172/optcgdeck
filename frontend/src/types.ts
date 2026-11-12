@@ -19,7 +19,6 @@ export interface Card {
   pack: string | null
   block: number | null
   image: string
-  variants: { id: string; image: string }[]
 }
 
 export interface Deck {

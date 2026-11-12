@@ -3,6 +3,9 @@
 Source: the Punk Records dataset (https://github.com/buhbbl/punk-records),
 which is generated from the official Bandai card list.
 
+Fills three tables: `sets` (each pack or deck), `cards` (one per card number)
+and `card_printings` (the base art and every alternate art, with images).
+
 New cards are added and changed cards are updated. Cards are never deleted,
 so decks that use them keep working even if the source drops a card.
 
@@ -45,7 +48,17 @@ def clean(value):
     return value
 
 
-def to_card(raw: dict, set_label: str | None) -> dict:
+def to_set(pack: dict) -> dict:
+    parts = pack.get("title_parts") or {}
+    return {
+        "id": pack["id"],
+        "code": parts.get("label") or pack.get("raw_title") or pack["id"],
+        "name": clean(parts.get("title")),
+        "kind": clean(parts.get("prefix")),
+    }
+
+
+def to_card(raw: dict, set_id: str | None) -> dict:
     raw = {k: clean(v) for k, v in raw.items()}
     category = raw["category"]
     is_leader = category == "Leader"
@@ -66,10 +79,10 @@ def to_card(raw: dict, set_label: str | None) -> dict:
         "rarity": raw.get("rarity"),
         # Set code from the card number, e.g. "OP01" from "OP01-016"; promos are "P".
         "set": raw["id"].split("-")[0],
-        "pack": set_label,
+        "set_id": set_id,
         "block": raw.get("block_number"),
-        "image": raw.get("img_full_url"),
-        "variants": [],
+        "image": raw.get("img_full_url"),  # the base art (saved in card_printings)
+        "variants": [],  # alternate arts (also saved in card_printings)
     }
 
 
@@ -99,24 +112,28 @@ def main() -> int:
     with ThreadPoolExecutor(max_workers=16) as pool:
         raws = list(pool.map(load, base_ids))
 
+    def set_id(pack_id: str | None) -> str | None:
+        return pack_id if pack_id in packs else None
+
     cards: dict[str, dict] = {}
     for raw in raws:
         if raw is None:
             continue
-        pack = packs.get(raw["pack_id"], {})
-        label = (pack.get("title_parts") or {}).get("label")
-        cards[raw["id"]] = to_card(raw, label)
+        cards[raw["id"]] = to_card(raw, set_id(raw.get("pack_id")))
 
+    alts = 0
     for alt in alt_ids:
         base = alt.split("_")[0]
         img = index[alt].get("img_url")
         if base in cards and img:
-            cards[base]["variants"].append({"id": alt, "image": img})
+            cards[base]["variants"].append({"id": alt, "image": img, "set_id": set_id(index[alt].get("pack_id"))})
+            alts += 1
 
+    sets = [to_set({**pack, "id": pack_id}) for pack_id, pack in packs.items()]
     with session_factory()() as db:
-        saved = upsert_cards(db, list(cards.values()))
+        saved = upsert_cards(db, list(cards.values()), sets)
     missing = len(base_ids) - len(cards)
-    print(f"saved {saved} cards to the database ({missing} failed to download)")
+    print(f"saved {len(sets)} sets, {saved} cards and {alts} alternate arts ({missing} cards failed to download)")
     return 1 if missing else 0
 
 
