@@ -4,7 +4,7 @@ import pytest
 
 from app.detect import CROP_SIZE, BadImage, find_cards
 
-from .photos import blank_photo, deck_photo, single_card_photo
+from .photos import blank_photo, deck_photo, single_card_photo, stack_photo
 
 
 def test_finds_every_card_in_reading_order():
@@ -102,3 +102,16 @@ def test_ignores_a_sliver_of_a_card_at_the_edge():
     # Only 20% of the second row is in the photo: too little to be worth a guess.
     photo, _ = cut_photo(deck_photo(8), keep_h=310 + 42)
     assert len(find_cards(photo)) == 4
+
+
+@pytest.mark.parametrize("offset", [(-14, -14), (-30, 0)], ids=["corner-wise", "sideways"])
+def test_boxes_the_front_card_of_each_fanned_stack(offset):
+    """Fanned stacks (deck builder screenshots, decks laid out by copies) give one card each: the one on top."""
+    photo, fronts = stack_photo(offset)
+    size = (900, 1200)
+    cards = find_cards(photo)
+    assert len(cards) == len(fronts)
+    for card, (fx, fy) in zip(cards, fronts):
+        corners = np.array(card.corners) * [size[1], size[0]]
+        assert corners.min(axis=0) == pytest.approx((fx, fy), abs=6)  # not the stack's corner
+        assert card_px(card, size) == pytest.approx((150, 210), abs=8)

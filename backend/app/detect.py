@@ -18,7 +18,9 @@ RATIO_RANGE = (1.2, 1.6)  # allows for photos taken a little off straight-on
 MIN_AREA = 0.002  # smallest card, as a share of the photo
 MAX_AREA = 0.9
 SINGLE_MAX_AREA = 0.98  # a photo of one card can be almost all card
-DETECT_SIZE = 1200  # photos are resized so the longest side is this, up or down, before finding outlines
+# Photos are resized so the longest side is this, up or down, before finding outlines.
+# Big enough that the 1-2 pixel steps between fanned cards in a deck builder screenshot still show.
+DETECT_SIZE = 2000
 CROP_SIZE = (630, 880)  # width, height of each cropped card
 MAX_CARDS = 60
 
@@ -93,6 +95,7 @@ def card_shapes(gray: np.ndarray, close: int, low: int, high: int, max_area: flo
         edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((close, close), np.uint8))
     # RETR_LIST also returns outlines inside other outlines, e.g. cards inside a decklist panel.
     contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    support = cv2.dilate(edges, np.ones((3, 3), np.uint8))  # edges, give or take a pixel
 
     h, w = gray.shape[:2]
     photo_area = h * w
@@ -107,7 +110,9 @@ def card_shapes(gray: np.ndarray, close: int, low: int, high: int, max_area: flo
         # which rules out L-shapes and odd clusters.
         if cv2.contourArea(cv2.convexHull(contour)) < 0.85 * rw * rh:
             continue
-        box = complete(cv2.boxPoints(rect), w, h)
+        if rw * rh < MIN_IN_VIEW * MIN_AREA * photo_area:
+            continue  # too small to hold a card, even with part of it off the photo
+        box = complete(front_card(contour, rect, support), w, h)
         if box is None:
             continue
         rw, rh = np.linalg.norm(box[1] - box[0]), np.linalg.norm(box[2] - box[1])
@@ -118,6 +123,78 @@ def card_shapes(gray: np.ndarray, close: int, low: int, high: int, max_area: flo
             continue
         found.append(box)
     return found
+
+
+STEP_TOLERANCE = 2  # pixels (at DETECT_SIZE): how far off a side an outline's point can be and still be on it
+MIN_FRONT = 0.4  # the front card of a stack is at least this share of the stack
+MIN_BACKING = 0.7  # share of a front card's outline that must lie on edges in the photo
+
+
+def front_card(contour: np.ndarray, rect, support: np.ndarray) -> np.ndarray:
+    """The front card of a fanned stack, or the whole box when it's one card.
+
+    A stack fanned out (sideways, or corner-wise as in deck builder screenshots)
+    has an outline like a staircase, and its box takes in the strips of the
+    cards behind. The front card shares two sides with the stack's box, meeting
+    at one corner: its other corners are where the outline steps away from
+    those sides. Each corner of the box gives a candidate this way. The ones
+    kept are card-shaped, upright, and have their sides showing as edges in the
+    photo. That still leaves the back card (its corner is as clean as the front
+    card's), so the front card is told by where cards are laid: each one on top
+    of the one before, so the front card is the lowest and furthest right. A
+    stack fanned the other way would get its back card.
+    """
+    box = cv2.boxPoints(rect)
+    origin, u, v = box[0], box[1] - box[0], box[3] - box[0]
+    lu, lv = float(np.linalg.norm(u)), float(np.linalg.norm(v))
+    if lu < 1 or lv < 1:
+        return box
+    u, v = u / lu, v / lv
+    pts = contour.reshape(-1, 2).astype(np.float32) - origin
+    pu, pv = pts @ u, pts @ v
+
+    def to_photo(u0: float, u1: float, v0: float, v1: float) -> np.ndarray:
+        corners = [(u0, v0), (u1, v0), (u1, v1), (u0, v1)]
+        return np.array([origin + a * u + b * v for a, b in corners], dtype=np.float32)
+
+    def backing(candidate: np.ndarray) -> float:
+        """Share of the candidate's outline that lies on an edge in the photo."""
+        t = np.linspace(0, 1, 24, endpoint=False)[:, None, None]
+        ends = np.roll(candidate, -1, axis=0)
+        xy = (candidate + t * (ends - candidate)).reshape(-1, 2).round().astype(int)
+        h, w = support.shape
+        inside = (xy[:, 0] >= 0) & (xy[:, 0] < w) & (xy[:, 1] >= 0) & (xy[:, 1] < h)
+        xy = xy[inside]
+        return float(support[xy[:, 1], xy[:, 0]].astype(bool).mean()) if len(xy) else 0.0
+
+    candidates = [box]
+    for cu in (0.0, lu):
+        for cv in (0.0, lv):
+            along_u = pu[np.abs(pv - cv) <= STEP_TOLERANCE]  # the outline's points on the side v = cv
+            along_v = pv[np.abs(pu - cu) <= STEP_TOLERANCE]
+            if not len(along_u) or not len(along_v):
+                continue
+            u0, u1 = (along_u.min(), lu) if cu else (0.0, along_u.max())
+            v0, v1 = (along_v.min(), lv) if cv else (0.0, along_v.max())
+            if (u1 - u0) * (v1 - v0) >= MIN_FRONT * lu * lv:
+                candidates.append(to_photo(u0, u1, v0, v1))
+
+    def peeled(c: np.ndarray) -> bool:
+        """A card-shaped part of the box, standing upright, with its sides showing in the photo."""
+        cu, cv = np.linalg.norm(c[1] - c[0]), np.linalg.norm(c[3] - c[0])
+        if cu * cv > 0.9 * lu * lv:
+            return False  # about the whole box
+        if not RATIO_RANGE[0] <= max(cu, cv) / max(min(cu, cv), 1e-6) <= RATIO_RANGE[1]:
+            return False
+        width, height = c.max(axis=0) - c.min(axis=0)
+        return height > width and backing(c) >= MIN_BACKING
+
+    fronts = [c for c in candidates[1:] if peeled(c)]
+    if not fronts:
+        return box
+    # Each card in a stack is laid on the one before, so the front card is the last laid:
+    # the lowest and furthest right.
+    return max(fronts, key=lambda c: float(c[:, 0].mean() + c[:, 1].mean()))
 
 
 def close_at_edge(contour: np.ndarray, w: int, h: int) -> np.ndarray:

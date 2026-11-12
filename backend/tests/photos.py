@@ -40,3 +40,25 @@ def single_card_photo(fill: float = 0.85, size=(1600, 1200)) -> bytes:
     part = card[ys - y0 : ys - y0 + min(h - ys, ch), xs - x0 : xs - x0 + min(w - xs, cw)]
     img[ys : ys + part.shape[0], xs : xs + part.shape[1]] = part
     return cv2.imencode(".jpg", img)[1].tobytes()
+
+
+def stack_photo(offset=(-14, -14), stacks: int = 3, per_stack: int = 4, size=(900, 1200)) -> tuple[bytes, list[tuple[int, int]]]:
+    """Stacks of cards fanned out like a deck builder shows them, each card laid on the one before.
+
+    `offset` is how far each card behind sits from the one in front of it. Returns
+    the JPEG and each front card's top-left corner.
+    """
+    h, w = size
+    img = np.full((h, w, 3), (40, 60, 120), np.uint8)
+    cw, ch = 150, 210
+    fronts = []
+    for s in range(stacks):
+        fx, fy = 120 + s * 340, 200
+        for k in range(per_stack - 1, -1, -1):  # back card first, front card last
+            x, y = fx + k * offset[0], fy + k * offset[1]
+            card = np.full((ch, cw, 3), (200, 210, 220), np.uint8)
+            cv2.rectangle(card, (0, 0), (cw - 1, ch - 1), (30, 30, 30), 3)  # sleeve edge
+            cv2.rectangle(card, (14, 14), (cw - 14, ch // 2), (60 + 40 * s, 90, 160), -1)  # "art"
+            img[y : y + ch, x : x + cw] = card
+        fronts.append((fx, fy))
+    return cv2.imencode(".jpg", img)[1].tobytes(), fronts
