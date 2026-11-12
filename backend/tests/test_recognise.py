@@ -137,3 +137,18 @@ def test_unplaced_cards_say_when_the_image_index_is_missing():
     assert scan.describe({"setCodeRead": "", "imageMatch": "image match off: run scripts/build_image_index.py"}) == (
         "No number read; image match off: run scripts/build_image_index.py"
     )
+
+
+def test_a_damaged_index_file_turns_image_match_off(tmp_path):
+    from app.match import load_index
+
+    bad = tmp_path / "index.npz"
+    bad.write_bytes(b"not a real index")
+    assert load_index(bad) is None
+
+
+def test_big_photos_are_shrunk_before_reading():
+    big = np.zeros((4000, 3000, 3), np.uint8)
+    assert scan.shrink(big).shape[:2] == (880, 660)
+    small = np.zeros((400, 300, 3), np.uint8)
+    assert scan.shrink(small) is small

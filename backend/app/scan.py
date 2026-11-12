@@ -23,9 +23,10 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
+import cv2
 import numpy as np
 
-from .detect import decode, find_cards
+from .detect import CROP_SIZE, decode, find_cards
 from .match import ImageIndex, load_index
 
 log = logging.getLogger("uvicorn.error")
@@ -250,6 +251,15 @@ def check_errors(answers, found_any: bool) -> str | None:
     return f"CardSight: {errors[0]}"
 
 
+def shrink(img: np.ndarray, longest: int = CROP_SIZE[1]) -> np.ndarray:
+    """Scales a photo down so its longest side is `longest` pixels (never up)."""
+    h, w = img.shape[:2]
+    scale = longest / max(h, w)
+    if scale >= 1:
+        return img
+    return cv2.resize(img, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA)
+
+
 def scan_single(
     image: bytes, filename: str, mime_type: str, store, identify: Identify = identify, recognise: Recognise | None = None
 ) -> dict:
@@ -263,10 +273,12 @@ def scan_single(
     crops = find_cards(image, single=True)
     index = load_index()
     crop_jpeg = crops[0].jpeg if crops else None
-    views = ([decode(crop_jpeg)] if crop_jpeg else []) + [decode(image)]
+    # Decoded only when needed. The whole photo is shrunk to about a crop's size:
+    # a phone photo is 10x bigger, which only makes reading and matching slow.
+    views = ([lambda: decode(crop_jpeg)] if crop_jpeg else []) + [lambda: shrink(decode(image))]
     seen_all, pick, pick_image = [], None, None
     for i, view in enumerate(views):
-        found, seen = recognise(view, store, index)
+        found, seen = recognise(view(), store, index)
         seen_all.append(seen)
         if found:
             pick, pick_image = found, (crop_jpeg if i == 0 and crop_jpeg else None)

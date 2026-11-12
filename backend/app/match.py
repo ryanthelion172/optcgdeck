@@ -30,7 +30,14 @@ VERSION = 1  # bump when the fingerprint changes, so old index files are rebuilt
 ART = (0.06, 0.94, 0.05, 0.62)  # left, right, top, bottom, as shares of the card
 COLOR_SIZE = 12
 HOG_SIZE = 64
-_hog = cv2.HOGDescriptor((HOG_SIZE, HOG_SIZE), (16, 16), (8, 8), (8, 8), 9)
+_local = threading.local()
+
+
+def _hog() -> cv2.HOGDescriptor:
+    """One HOG descriptor per thread, since crops are matched in parallel."""
+    if not hasattr(_local, "hog"):
+        _local.hog = cv2.HOGDescriptor((HOG_SIZE, HOG_SIZE), (16, 16), (8, 8), (8, 8), 9)
+    return _local.hog
 
 # A match is accepted when it's this close, and this much closer than the next card.
 MIN_SCORE = 0.6
@@ -56,7 +63,7 @@ def fingerprint(img: np.ndarray) -> np.ndarray:
     color = np.concatenate([_unit(lab[:, :, c]) for c in range(3)]) / np.sqrt(3)
     gray = cv2.cvtColor(cv2.resize(art, (HOG_SIZE, HOG_SIZE), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY)
     gray = cv2.equalizeHist(gray)
-    shape = _unit(_hog.compute(gray))
+    shape = _unit(_hog().compute(gray))
     return np.concatenate([color, shape]) / np.sqrt(2)
 
 
@@ -136,10 +143,13 @@ def load_index(path: Path = INDEX_FILE) -> ImageIndex | None:
     with _lock:
         if _loaded is None or _loaded[0] != mtime:
             index = None
-            with np.load(path) as data:
-                if int(data["version"]) == VERSION:
-                    index = ImageIndex([str(i) for i in data["ids"]], data["vectors"])
-                else:
-                    log.warning("%s is out of date; run scripts/build_image_index.py again.", path.name)
+            try:
+                with np.load(path) as data:
+                    if int(data["version"]) == VERSION:
+                        index = ImageIndex([str(i) for i in data["ids"]], data["vectors"])
+                    else:
+                        log.warning("%s is out of date; run scripts/build_image_index.py again.", path.name)
+            except Exception as exc:  # a damaged file shouldn't break scanning
+                log.warning("Couldn't read %s (%s); run scripts/build_image_index.py again.", path.name, exc)
             _loaded = (mtime, index)
         return _loaded[1]
