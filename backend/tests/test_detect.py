@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import pytest
 
-from app.detect import CROP_SIZE, BadImage, find_cards
+from app.detect import CROP_SIZE, BadImage, card_sized_rectangles, find_cards
 
 from .photos import blank_photo, deck_photo, single_card_photo, stack_photo
 
@@ -119,3 +119,30 @@ def test_boxes_the_front_card_of_each_fanned_stack(offset):
         corners = np.array(card.corners) * [size[1], size[0]]
         assert corners.min(axis=0) == pytest.approx((fx, fy), abs=6)  # not the stack's corner
         assert card_px(card, size) == pytest.approx((150, 210), abs=8)
+
+
+def test_rectangle_search_finds_cards_whose_outline_is_broken():
+    """Dim photos and glare leave outlines open; card-sized rectangles on the edges are still found."""
+    gray = np.full((900, 1200), 60, np.uint8)
+    cw, ch = 150, 210
+    tops = [(80 + c * 220, 80 + r * 300) for r in range(2) for c in range(4)]
+    for x, y in tops:
+        cv2.rectangle(gray, (x, y), (x + cw, y + ch), 200, -1)
+        # Wash out each corner, so no outline closes.
+        for cx, cy in [(x, y), (x + cw, y), (x, y + ch), (x + cw, y + ch)]:
+            cv2.circle(gray, (cx, cy), 18, 60, -1)
+    gray = cv2.GaussianBlur(gray, (5, 5), 0)
+    found = [np.array([[x, y], [x + cw, y], [x + cw, y + ch], [x, y + ch]], np.float32) for x, y in tops[:2]]
+    added = sorted(b.min(axis=0).tolist() for b in card_sized_rectangles(gray, found))
+    assert len(added) == len(tops) - 2
+    assert np.abs(np.array(added) - sorted(tops[2:])).max() <= 6
+
+
+def test_rectangle_search_skips_a_rectangle_straddling_two_cards():
+    gray = np.full((600, 1200), 60, np.uint8)
+    cw, ch = 150, 210
+    tops = [(100 + c * 160, 100) for c in range(5)]  # cards side by side, 10 px apart
+    for x, y in tops:
+        cv2.rectangle(gray, (x, y), (x + cw, y + ch), 200, -1)
+    found = [np.array([[x, y], [x + cw, y], [x + cw, y + ch], [x, y + ch]], np.float32) for x, y in tops]
+    assert card_sized_rectangles(cv2.GaussianBlur(gray, (5, 5), 0), found) == []

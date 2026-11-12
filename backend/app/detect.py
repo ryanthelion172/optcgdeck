@@ -97,9 +97,8 @@ OVERLAP = 0.3  # a rectangle overlapping a card already found by this share of t
 def card_sized_rectangles(gray: np.ndarray, found: list[np.ndarray]) -> list[np.ndarray]:
     """More cards, found as rectangles of the size of those already found.
 
-    Outlines break up when a photo is dim, sleeves catch the light, or cards
-    overlap (a row laid over the bottom of the row above), so some cards never
-    give a closed outline. Their sides still show as straight edges, though, and
+    Outlines break up when a photo is dim or sleeves catch the light, so some
+    cards never give a closed outline. Their sides still show as straight edges, though, and
     every card in the photo is about the same size. So every place a rectangle of
     that size could sit is scored by how much of its four sides lies on edges
     running the same way (vertical for the left and right sides, horizontal for
@@ -108,8 +107,8 @@ def card_sized_rectangles(gray: np.ndarray, found: list[np.ndarray]) -> list[np.
     middle straddles two cards, so it is dropped too.
 
     Needs two cards found already, to know the size and where the deck lies; a
-    rectangle more than a card's size away from those is something else in the
-    photo. Cards are taken to be upright.
+    rectangle more than a card's size away from every card found is something
+    else in the photo. Cards are taken to be upright.
     """
     if len(found) < 2:
         return []
@@ -147,19 +146,23 @@ def card_sized_rectangles(gray: np.ndarray, found: list[np.ndarray]) -> list[np.
                 candidates.append((float(total[y, x]), (int(x), int(y), cw, ch)))
 
     taken = [cv2.boundingRect(b.astype(np.float32)) for b in found]
-    # The deck lies together, so a card is at most about a card away from the area the found
-    # ones cover; further out are the photo's other things (a screenshot's buttons and logos).
-    corners = np.concatenate(found)
-    (left, top), (right, bottom) = corners.min(axis=0) - (width, height), corners.max(axis=0) + (width, height)
-    added = []
-    for _, (x, y, cw, ch) in sorted(candidates, reverse=True):
-        if not (left <= x + cw / 2 <= right and top <= y + ch / 2 <= bottom):
-            continue
-        if any(overlap_share((x, y, cw, ch), t) > OVERLAP for t in taken):
-            continue
-        taken.append((x, y, cw, ch))
-        added.append(np.array([[x, y], [x + cw, y], [x + cw, y + ch], [x, y + ch]], dtype=np.float32))
-    return added
+    candidates.sort(reverse=True)
+    added: list[np.ndarray] = []
+    while True:  # each card added can bring its neighbours within reach
+        # The deck lies together, so a card is at most about a card away from the cards found;
+        # further out are the photo's other things (a screenshot's buttons and logos).
+        corners = np.concatenate(found + added)
+        (left, top), (right, bottom) = corners.min(axis=0) - (width, height), corners.max(axis=0) + (width, height)
+        before = len(added)
+        for _, (x, y, cw, ch) in candidates:
+            if not (left <= x + cw / 2 <= right and top <= y + ch / 2 <= bottom):
+                continue
+            if any(overlap_share((x, y, cw, ch), t) > OVERLAP for t in taken):
+                continue
+            taken.append((x, y, cw, ch))
+            added.append(np.array([[x, y], [x + cw, y], [x + cw, y + ch], [x, y + ch]], dtype=np.float32))
+        if len(added) == before:
+            return added
 
 
 def overlap_share(a, b) -> float:
