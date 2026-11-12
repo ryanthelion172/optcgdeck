@@ -104,7 +104,11 @@ def test_ignores_a_sliver_of_a_card_at_the_edge():
     assert len(find_cards(photo)) == 4
 
 
-@pytest.mark.parametrize("offset", [(-14, -14), (-30, 0)], ids=["corner-wise", "sideways"])
+@pytest.mark.parametrize(
+    "offset",
+    [(-14, -14), (-30, 0), (14, 14), (30, 0)],
+    ids=["corner-wise", "sideways", "corner-wise-reversed", "sideways-reversed"],
+)
 def test_boxes_the_front_card_of_each_fanned_stack(offset):
     """Fanned stacks (deck builder screenshots, decks laid out by copies) give one card each: the one on top."""
     photo, fronts = stack_photo(offset)

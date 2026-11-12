@@ -80,7 +80,93 @@ def find_outlines(img: np.ndarray, single: bool = False) -> list[np.ndarray]:
         key = (len(boxes), sum(cv2.contourArea(b) for b in boxes))
         if key > best_key:
             best, best_key = boxes, key
+    if not single:
+        best = best + card_sized_rectangles(blur, best)
     return reading_order([box / scale for box in best])[:MAX_CARDS]
+
+
+# The rectangle search (see card_sized_rectangles).
+SEARCH_SCALES = (0.9, 0.95, 1.0, 1.05, 1.1)  # card sizes tried, relative to the cards already found
+SIDE_EDGE = 5  # pixels (at DETECT_SIZE): how far an edge may be off a rectangle's side and still back it
+MIN_SIDE = 0.5  # share of every side that must lie on an edge
+MIN_SIDES = 0.7  # share of all four sides, together, that must lie on edges
+MAX_INNER_LINE = 0.85  # an edge running this much of a card's height inside it is another card's side
+OVERLAP = 0.3  # a rectangle overlapping a card already found by this share of the smaller is the same card
+
+
+def card_sized_rectangles(gray: np.ndarray, found: list[np.ndarray]) -> list[np.ndarray]:
+    """More cards, found as rectangles of the size of those already found.
+
+    Outlines break up when a photo is dim, sleeves catch the light, or cards
+    overlap (a row laid over the bottom of the row above), so some cards never
+    give a closed outline. Their sides still show as straight edges, though, and
+    every card in the photo is about the same size. So every place a rectangle of
+    that size could sit is scored by how much of its four sides lies on edges
+    running the same way (vertical for the left and right sides, horizontal for
+    the top and bottom), the best-scoring places are kept, and any overlapping a
+    card already found is dropped. A rectangle with an edge running down its
+    middle straddles two cards, so it is dropped too.
+
+    Needs two cards found already, to know the size and where the deck lies; a
+    rectangle more than a card's size away from those is something else in the
+    photo. Cards are taken to be upright.
+    """
+    if len(found) < 2:
+        return []
+    sides = sorted(sorted((np.linalg.norm(b[1] - b[0]), np.linalg.norm(b[2] - b[1]))) for b in found)
+    width, height = float(np.median([s[0] for s in sides])), float(np.median([s[1] for s in sides]))
+
+    edges = cv2.Canny(gray, 30, 100) > 0
+    gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0)
+    gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1)
+    vertical = (edges & (np.abs(gx) > np.abs(gy))).astype(np.uint8)
+    horizontal = (edges & (np.abs(gy) >= np.abs(gx))).astype(np.uint8)
+    vertical = cv2.dilate(vertical, np.ones((1, SIDE_EDGE), np.uint8)).astype(np.float32)
+    horizontal = cv2.dilate(horizontal, np.ones((SIDE_EDGE, 1), np.uint8)).astype(np.float32)
+
+    candidates = []
+    h, w = gray.shape
+    for size in SEARCH_SCALES:
+        cw, ch = round(width * size), round(height * size)
+        if cw >= w or ch >= h:
+            continue
+        # down[y, x]: share of the column x from row y down ch rows that is edge; across: of the row from x along cw.
+        down = cv2.boxFilter(vertical, -1, (1, ch), anchor=(0, 0), borderType=cv2.BORDER_CONSTANT)
+        across = cv2.boxFilter(horizontal, -1, (cw, 1), anchor=(0, 0), borderType=cv2.BORDER_CONSTANT)
+        ny, nx = h - ch + 1, w - cw + 1  # top-left corners that keep the rectangle in the photo
+        score = np.stack([
+            down[:ny, :nx], down[:ny, cw - 1 : cw - 1 + nx],  # left, right
+            across[:ny, :nx], across[ch - 1 : ch - 1 + ny, :nx],  # top, bottom
+        ])
+        total, weakest = score.mean(axis=0), score.min(axis=0)
+        near = np.ones((max(3, ch // 4) | 1, max(3, cw // 4) | 1), np.uint8)
+        best_nearby = total >= cv2.dilate(total, near)
+        margin = round(cw * 0.12)
+        for y, x in zip(*np.nonzero(best_nearby & (weakest >= MIN_SIDE) & (total >= MIN_SIDES))):
+            if down[y, x + margin : x + cw - margin].max() < MAX_INNER_LINE:
+                candidates.append((float(total[y, x]), (int(x), int(y), cw, ch)))
+
+    taken = [cv2.boundingRect(b.astype(np.float32)) for b in found]
+    # The deck lies together, so a card is at most about a card away from the area the found
+    # ones cover; further out are the photo's other things (a screenshot's buttons and logos).
+    corners = np.concatenate(found)
+    (left, top), (right, bottom) = corners.min(axis=0) - (width, height), corners.max(axis=0) + (width, height)
+    added = []
+    for _, (x, y, cw, ch) in sorted(candidates, reverse=True):
+        if not (left <= x + cw / 2 <= right and top <= y + ch / 2 <= bottom):
+            continue
+        if any(overlap_share((x, y, cw, ch), t) > OVERLAP for t in taken):
+            continue
+        taken.append((x, y, cw, ch))
+        added.append(np.array([[x, y], [x + cw, y], [x + cw, y + ch], [x, y + ch]], dtype=np.float32))
+    return added
+
+
+def overlap_share(a, b) -> float:
+    """How much two (x, y, w, h) rectangles overlap, as a share of the smaller."""
+    ix = min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0])
+    iy = min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1])
+    return max(ix, 0) * max(iy, 0) / min(a[2] * a[3], b[2] * b[3])
 
 
 def card_shapes(gray: np.ndarray, close: int, low: int, high: int, max_area: float = MAX_AREA) -> list[np.ndarray]:
@@ -95,7 +181,7 @@ def card_shapes(gray: np.ndarray, close: int, low: int, high: int, max_area: flo
         edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((close, close), np.uint8))
     # RETR_LIST also returns outlines inside other outlines, e.g. cards inside a decklist panel.
     contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-    support = cv2.dilate(edges, np.ones((3, 3), np.uint8))  # edges, give or take a pixel
+    support = cv2.dilate(edges, np.ones((5, 5), np.uint8))  # edges, give or take two pixels
 
     h, w = gray.shape[:2]
     photo_area = h * w
@@ -140,9 +226,10 @@ def front_card(contour: np.ndarray, rect, support: np.ndarray) -> np.ndarray:
     those sides. Each corner of the box gives a candidate this way. The ones
     kept are card-shaped, upright, and have their sides showing as edges in the
     photo. That still leaves the back card (its corner is as clean as the front
-    card's), so the front card is told by where cards are laid: each one on top
-    of the one before, so the front card is the lowest and furthest right. A
-    stack fanned the other way would get its back card.
+    card's), but the front card's side runs down inside the back card, so a
+    candidate with an edge running its length inside it is dropped. Should that
+    not settle it, the lowest and furthest right is taken, as cards are usually
+    laid left to right.
     """
     box = cv2.boxPoints(rect)
     origin, u, v = box[0], box[1] - box[0], box[3] - box[0]
@@ -189,11 +276,26 @@ def front_card(contour: np.ndarray, rect, support: np.ndarray) -> np.ndarray:
         width, height = c.max(axis=0) - c.min(axis=0)
         return height > width and backing(c) >= MIN_BACKING
 
+    def crossed(c: np.ndarray) -> bool:
+        """Whether an edge runs the card's length inside it: the side of a card lying on top of it."""
+        a, b, d = c[0], c[1] - c[0], c[3] - c[0]
+        if np.linalg.norm(b) > np.linalg.norm(d):
+            b, d = d, b  # b across the card, d along it
+        across = np.linspace(0.12, 0.88, max(2, int(np.linalg.norm(b) * 0.76)))
+        along = np.linspace(0.0, 1.0, max(2, int(np.linalg.norm(d))))
+        xy = (a + across[:, None, None] * b + along[None, :, None] * d).round().astype(int)
+        h, w = support.shape
+        xy[..., 0] = xy[..., 0].clip(0, w - 1)
+        xy[..., 1] = xy[..., 1].clip(0, h - 1)
+        return bool((support[xy[..., 1], xy[..., 0]] > 0).mean(axis=1).max() >= MAX_INNER_LINE)
+
     fronts = [c for c in candidates[1:] if peeled(c)]
     if not fronts:
         return box
-    # Each card in a stack is laid on the one before, so the front card is the last laid:
-    # the lowest and furthest right.
+    # A card behind has the front card's side running down inside it; the front card doesn't.
+    fronts = [c for c in fronts if not crossed(c)] or fronts
+    # If that leaves more than one: each card in a stack is laid on the one before, so the
+    # front card is usually the last laid, the lowest and furthest right.
     return max(fronts, key=lambda c: float(c[:, 0].mean() + c[:, 1].mean()))
 
 
