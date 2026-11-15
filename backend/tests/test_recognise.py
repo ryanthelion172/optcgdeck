@@ -119,6 +119,15 @@ def test_unplaced_cards_say_what_was_read(monkeypatch):
     )
     body = TestClient(app).post("/api/scan", files={"photo": ("d.jpg", deck_photo(2), "image/jpeg")}).json()
     assert body["unmatched"][0]["detail"] == 'Read "OP0"; closest art OP01-016 (0.41)'
+    assert body["unmatched"][0]["closest"] == "OP01-016"
+
+
+def test_closest_card_prefers_the_name_match():
+    seen = {"imageMatch": {"card": "OP01-016", "score": 0.4}, "nameMatch": {"card": "OP01-013", "score": 0.5}}
+    assert scan.closest(seen) == "OP01-013"
+    assert scan.closest({"imageMatch": {"card": "OP01-016", "score": 0.4}}) == "OP01-016"
+    assert scan.closest({"imageMatch": "image match off: run scripts/build_image_index.py"}) is None
+    assert scan.closest({}) is None
 
 
 def test_reads_the_printed_card_number():

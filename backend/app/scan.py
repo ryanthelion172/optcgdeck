@@ -272,6 +272,29 @@ def describe(seen: dict) -> str:
     return "; ".join(parts)
 
 
+def closest(seen: dict) -> str | None:
+    """The card id the local match thinks is nearest, offered to the user to confirm.
+
+    The match among cards with the name read wins over the plain art match: it
+    agrees with the text on the card as well as the picture.
+    """
+    for key in ("nameMatch", "imageMatch"):
+        m = seen.get(key)
+        if isinstance(m, dict) and m.get("card"):
+            return m["card"]
+    return None
+
+
+def unmatched_entry(label: str, seen: dict, jpeg: bytes | None) -> dict:
+    """One card that wasn't placed: its crop, why, and the closest card if any."""
+    entry = {"label": label, "confidence": "Low", "detail": describe(seen)}
+    if jpeg:
+        entry["image"] = data_url(jpeg)
+    if guess := closest(seen):
+        entry["closest"] = guess
+    return entry
+
+
 def call_all(jobs: list[tuple[bytes, str, str]], identify: Identify) -> list[tuple[list[dict], ScanError | None]]:
     """Sends each image to CardSight, in parallel. Errors are returned, not raised."""
 
@@ -349,10 +372,7 @@ def scan_single(
 
     result = build_result([pick] if pick else [], store, [pick_image])
     if not pick:
-        entry = {"label": "The card in the photo (not recognised)", "confidence": "Low", "detail": describe(seen_all[0])}
-        if crop_jpeg:
-            entry["image"] = data_url(crop_jpeg)
-        result["unmatched"] = [entry]
+        result["unmatched"] = [unmatched_entry("The card in the photo (not recognised)", seen_all[0], crop_jpeg)]
     result["detected"] = 1
     result["cardsFound"] = len(crops)
     if note:
@@ -408,12 +428,7 @@ def scan(
             detections.append(found)
             images.append(crops[i].jpeg)
         else:
-            unreadable.append({
-                "label": f"Card {i + 1} in the photo (not recognised)",
-                "confidence": "Low",
-                "image": data_url(crops[i].jpeg),
-                "detail": describe(seen),
-            })
+            unreadable.append(unmatched_entry(f"Card {i + 1} in the photo (not recognised)", seen, crops[i].jpeg))
 
     result = build_result(detections, store, images)
     from_whole = build_result(whole, store)

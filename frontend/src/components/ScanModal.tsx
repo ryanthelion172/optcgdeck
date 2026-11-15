@@ -26,6 +26,8 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
   const [name, setName] = useState('')
   // The unmatched card shown large, if any.
   const [zoomed, setZoomed] = useState<number | null>(null)
+  // What the user said about each unmatched card's closest-card guess, by its index.
+  const [answers, setAnswers] = useState<Record<number, 'yes' | 'no'>>({})
   // Counts scans, so a slow answer for an older photo is ignored.
   const scanId = useRef(0)
 
@@ -60,6 +62,7 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
       })
       setResult(res)
       setZoomed(null)
+      setAnswers({})
       setRows(found)
       setName(defaultDeckName(found.find((r) => r.card.category === 'Leader')?.card, deckNames))
     } catch (e) {
@@ -75,6 +78,28 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
 
   const setCount = (id: string, count: number) =>
     setRows((rs) => rs.map((r) => (r.card.id === id ? { ...r, count: Math.max(0, Math.min(maxCopies(id), count)) } : r)))
+
+  /** The user says the closest card is right: add one copy of it to the deck. */
+  const accept = (i: number, card: Card) => {
+    setAnswers((a) => ({ ...a, [i]: 'yes' }))
+    setZoomed((z) => (z === i ? null : z))
+    setRows((rs) => {
+      const via = 'confirmed by you'
+      const existing = rs.find((r) => r.card.id === card.id)
+      if (!existing) return [...rs, { card, count: 1, confidence: 'High', via: [via] }]
+      return rs.map((r) =>
+        r === existing
+          ? {
+              ...r,
+              count: card.category === 'Leader' ? r.count : Math.min(maxCopies(card.id), r.count + 1),
+              via: r.via.includes(via) ? r.via : [...r.via, via],
+            }
+          : r,
+      )
+    })
+  }
+
+  const misses = (result?.unmatched ?? []).map((u, i) => ({ ...u, i })).filter((u) => answers[u.i] !== 'yes')
 
   const create = () => {
     const cards: Record<string, number> = {}
@@ -197,30 +222,63 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
             {mainRows.length === 0 && <li className="p-3 text-sm text-slate-400">No main-deck cards recognised.</li>}
           </ul>
           {result.note && <p className="shrink-0 text-sm text-amber-300">{result.note}</p>}
-          {result.unmatched.length > 0 && (
-            <div className="max-h-80 shrink-0 overflow-y-auto text-sm text-amber-300">
-              Couldn't match {result.unmatched.length} card{result.unmatched.length === 1 ? '' : 's'}; add{' '}
-              {result.unmatched.length === 1 ? 'it' : 'them'} by hand:
+          {misses.length > 0 && (
+            <div className="max-h-96 shrink-0 overflow-y-auto text-sm text-amber-300">
+              Couldn't match {misses.length} card{misses.length === 1 ? '' : 's'}. Confirm the closest card, or add{' '}
+              {misses.length === 1 ? 'it' : 'them'} by hand:
               <ul className="mt-2 flex flex-wrap gap-3 text-slate-400">
-                {result.unmatched.map((u, i) => (
-                  <li key={i} className={`flex flex-col gap-1 ${zoomed === i ? 'w-64' : 'w-24'}`}>
-                    {u.image ? (
-                      <button type="button" onClick={() => setZoomed(zoomed === i ? null : i)} title="Click to enlarge">
-                        <img
-                          src={u.image}
-                          alt={`What the scan cut out for: ${u.label}`}
-                          className="aspect-[63/88] w-full rounded border border-slate-700 bg-slate-950 object-contain"
-                        />
-                      </button>
-                    ) : (
-                      <div className="flex aspect-[63/88] w-full items-center justify-center rounded border border-dashed border-slate-700 p-1 text-center text-xs text-slate-500">
-                        No card outline found
-                      </div>
-                    )}
-                    <span className="text-xs leading-tight">{u.label}</span>
-                    {u.detail && <span className="text-xs leading-tight text-slate-500">{u.detail}</span>}
-                  </li>
-                ))}
+                {misses.map((u) => {
+                  const i = u.i
+                  const guess = u.closest && answers[i] !== 'no' ? lookup(u.closest) : undefined
+                  return (
+                    <li key={i} className={`flex flex-col gap-1 ${zoomed === i ? 'w-64' : 'w-28'}`}>
+                      {u.image ? (
+                        <button type="button" onClick={() => setZoomed(zoomed === i ? null : i)} title="Click to enlarge">
+                          <img
+                            src={u.image}
+                            alt={`What the scan cut out for: ${u.label}`}
+                            className="aspect-[63/88] w-full rounded border border-slate-700 bg-slate-950 object-contain"
+                          />
+                        </button>
+                      ) : (
+                        <div className="flex aspect-[63/88] w-full items-center justify-center rounded border border-dashed border-slate-700 p-1 text-center text-xs text-slate-500">
+                          No card outline found
+                        </div>
+                      )}
+                      <span className="text-xs leading-tight">{u.label}</span>
+                      {u.detail && <span className="text-xs leading-tight text-slate-500">{u.detail}</span>}
+                      {guess && (
+                        <div className="mt-1 flex flex-col gap-1 rounded border border-slate-700 bg-slate-900 p-1.5">
+                          <span className="text-xs font-medium text-slate-200">Is this the card?</span>
+                          <CardImage card={guess} showText={false} className="!rounded" />
+                          <span className="text-xs leading-tight text-slate-300">
+                            {guess.name} <span className="text-slate-500">{guess.id}</span>
+                          </span>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              aria-label={`Yes, it's ${guess.name}: add it to the deck`}
+                              title="Yes, add it to the deck"
+                              onClick={() => accept(i, guess)}
+                              className="flex h-8 flex-1 items-center justify-center rounded bg-green-700 text-lg font-bold text-white hover:bg-green-600"
+                            >
+                              ✓
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`No, it's not ${guess.name}`}
+                              title="No, it's a different card"
+                              onClick={() => setAnswers((a) => ({ ...a, [i]: 'no' }))}
+                              className="flex h-8 flex-1 items-center justify-center rounded bg-red-700 text-lg font-bold text-white hover:bg-red-600"
+                            >
+                              ✗
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </li>
+                  )
+                })}
               </ul>
             </div>
           )}
