@@ -12,7 +12,9 @@ OpenCV and crops it. Each crop is then identified, trying in order:
 
 1. **Set code:** reads the card number printed in the bottom-right corner (RapidOCR, runs locally).
 2. **Image match:** compares the card's art with every card's official image (runs locally; needs
-   the image index, see below).
+   the image index, see below). When that match is weak or missing, the card's **name** printed at
+   the bottom is read (RapidOCR again), and the art is compared with only the cards that have that
+   name. This works for English cards only.
 3. **CardSight:** the [CardSight AI](https://cardsight.ai) API, only for cards the first two
    couldn't place.
 
@@ -67,6 +69,13 @@ stored online. It holds these tables:
   `scripts/import_cards.py`. `set_id` points at the set it first came out in.
 - `card_printings`: every printed version of a card, the base art and each alternate art
   (e.g. `OP01-016_p1`), with its image. Photo scanning uses these; the app is only sent base arts.
+  Besides the English (North America/Europe) list, the import adds alternate arts that only the
+  other regions' lists have (English Asia, Japanese, Chinese, Thai, French), such as Asia-only
+  "Limited Product Card" arts. `language` says which list each printing came from.
+- `card_names`: each card's name in other languages, keyed by card number (Japanese for now, e.g.
+  `OP01-016` → ナミ). Card numbers are the same in every language, so `scripts/import_cards.py`
+  fills it from the Japanese card list in the same dataset. Sets that aren't in the Japanese list
+  yet (at the moment OP18 and EB05) have no Japanese names until a later import.
 - `users`: accounts (email, display name, password hash). Sign-up and sign-in aren't built yet.
 - `decks`: each deck's name, Leader and owner.
 - `deck_cards`: how many copies of each card a deck has.

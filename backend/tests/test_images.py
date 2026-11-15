@@ -89,3 +89,13 @@ def test_simultaneous_requests_download_once(fake_web):
     assert [r.status_code for r in responses] == [200] * 5
     assert all(r.content == PNG for r in responses)
     assert len(calls) == 1
+
+
+def test_each_regions_site_gets_its_own_referer():
+    from app.images import referer_for
+
+    assert referer_for("https://asia-en.onepiece-cardgame.com/images/cardlist/card/OP03-055_p1.png") == (
+        "https://asia-en.onepiece-cardgame.com/cardlist/"
+    )
+    assert referer_for("https://www.onepiece-cardgame.com/images/x.png") == "https://www.onepiece-cardgame.com/cardlist/"
+    assert referer_for("https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com/x.webp") == "https://en.onepiece-cardgame.com/cardlist/"

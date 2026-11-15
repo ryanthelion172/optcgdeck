@@ -17,7 +17,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from .db import database_url, session_factory
-from .models import Card, CardPrinting, Set
+from .models import Card, CardName, CardPrinting, Set
 
 
 class CardStore:
@@ -41,7 +41,10 @@ def load_cards(db: Session) -> list[dict]:
 def load_printings(db: Session) -> list[dict]:
     """Every printing (base and alternate arts) with its image, for photo scanning."""
     rows = db.scalars(select(CardPrinting).order_by(CardPrinting.id))
-    return [{"id": p.id, "card_id": p.card_id, "is_base": p.is_base, "image": p.image_url} for p in rows]
+    return [
+        {"id": p.id, "card_id": p.card_id, "is_base": p.is_base, "image": p.image_url, "language": p.language}
+        for p in rows
+    ]
 
 
 @lru_cache(maxsize=1)
@@ -76,7 +79,8 @@ def upsert_cards(db: Session, cards: list[dict], sets: list[dict] | None = None)
 
     Takes cards in the shape the import script builds: the frontend shape (with
     "set"), plus "set_id", the base art's "image", and "variants", the
-    alternate arts as [{"id": "OP01-001_p1", "image": "...", "set_id": "..."}].
+    alternate arts as [{"id": "OP01-001_p1", "image": "...", "set_id": "...", "language": "en"}]
+    ("language": which region's card list it came from, "en" if left out).
     `sets` are {"id", "code", "name", "kind"}.
     """
     if sets:
@@ -89,13 +93,46 @@ def upsert_cards(db: Session, cards: list[dict], sets: list[dict] | None = None)
         row.setdefault("set_id", None)
         rows.append(row)
         printings.append(
-            {"id": c["id"], "card_id": c["id"], "is_base": True, "set_id": row["set_id"], "image_url": c.get("image")}
+            {"id": c["id"], "card_id": c["id"], "is_base": True, "set_id": row["set_id"], "image_url": c.get("image"), "language": "en"}
         )
         for v in c.get("variants") or []:
             printings.append(
-                {"id": v["id"], "card_id": c["id"], "is_base": False, "set_id": v.get("set_id"), "image_url": v.get("image")}
+                {
+                    "id": v["id"], "card_id": c["id"], "is_base": False, "set_id": v.get("set_id"),
+                    "image_url": v.get("image"), "language": v.get("language", "en"),
+                }
             )
     _upsert(db, Card, rows)
     _upsert(db, CardPrinting, printings)
     db.commit()
     return len(rows)
+
+
+def upsert_card_names(db: Session, names: dict[str, str], language: str) -> int:
+    """Saves each card's name in `language` ({card id: name}), for cards we have.
+
+    Names for card numbers that aren't in `cards` (e.g. Japanese-only cards) are
+    skipped. Returns how many were saved. Never deletes anything.
+    """
+    known = set(db.scalars(select(Card.id)))
+    rows = [{"card_id": cid, "language": language, "name": name} for cid, name in names.items() if cid in known and name]
+    for start in range(0, len(rows), 500):
+        stmt = insert(CardName).values(rows[start : start + 500])
+        db.execute(
+            stmt.on_conflict_do_update(
+                index_elements=[CardName.card_id, CardName.language],
+                set_={"name": stmt.excluded.name, "updated_at": func.now()},
+            )
+        )
+    db.commit()
+    return len(rows)
+
+
+def load_card_names(db: Session, language: str) -> dict[str, list[str]]:
+    """Each name in `language` and the ids of the cards with it, e.g. {"ナミ": ["OP01-016", ...]}."""
+    by_name: dict[str, list[str]] = {}
+    for card_id, name in db.execute(
+        select(CardName.card_id, CardName.name).where(CardName.language == language).order_by(CardName.card_id)
+    ):
+        by_name.setdefault(name, []).append(card_id)
+    return by_name

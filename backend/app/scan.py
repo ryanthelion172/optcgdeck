@@ -6,6 +6,9 @@ is then identified, trying in order:
 1. "set code": reading the card number printed in its bottom-right corner (ocr.py).
 2. "image match": comparing its art with every card's image (match.py). Needs
    the index from scripts/build_image_index.py; skipped until that's been run.
+   When that match is weak or missing, "name + image match": reading the name
+   printed at the bottom (ocr.py), then comparing the art with only the cards
+   that have that name.
 3. "CardSight": the CardSight AI API, only for cards the first two couldn't
    place. The API key is read from CARDSIGHTAI_API_KEY (put it in backend/.env).
 
@@ -27,7 +30,7 @@ import cv2
 import numpy as np
 
 from .detect import CROP_SIZE, decode, find_cards
-from .match import ImageIndex, load_index
+from .match import ImageIndex, Match, load_index
 
 log = logging.getLogger("uvicorn.error")
 
@@ -172,10 +175,13 @@ def local_detection(card_id: str, confidence: str, via: str) -> dict:
 
 
 def recognise_card(img: np.ndarray, store, index: ImageIndex | None) -> tuple[dict | None, dict]:
-    """Identifies one card image without CardSight: its printed number, then its art.
+    """Identifies one card image without CardSight: its printed number, then its art,
+    then its name.
 
-    The number is read the right way up first. Only if the art doesn't match
-    either is it read upside down, since reading is the slow part.
+    The number is read the right way up first. If the art match is weak or
+    missing, the card's name is read and the art is compared with only the cards
+    of that name. Only if none of that works is the number read upside down,
+    since reading is the slow part.
     Returns (detection or None, what each step saw, for debugging).
     """
     seen: dict = {}
@@ -197,17 +203,55 @@ def recognise_card(img: np.ndarray, store, index: ImageIndex | None) -> tuple[di
 
     if found := read(upside_down=False):
         return found, seen
+    m = None
     if index is None:
         seen["imageMatch"] = "image match off: run scripts/build_image_index.py"
     elif m := index.best(img):
         seen["imageMatch"] = {
             "card": m.card_id, "score": round(m.score, 3), "confidence": m.confidence, "runnersUp": m.runners_up
         }
-        if m.confidence:
+        if m.confidence in ("High", "Medium"):
             return local_detection(m.card_id, m.confidence, "image match"), seen
+    if index is not None and (found := by_name(img, store, index, m, seen)):
+        return found, seen
+    if m is not None and m.confidence:  # a weak art match, and the name didn't help
+        return local_detection(m.card_id, m.confidence, "image match"), seen
     if "not installed" not in seen.get("setCodeRead", "") and (found := read(upside_down=True)):
         return found, seen
     return None, seen
+
+
+def by_name(img: np.ndarray, store, index: ImageIndex, art: Match | None, seen: dict) -> dict | None:
+    """When the art match is weak or missing: reads the card's name, then matches the
+    art against only the cards with that name. None if no name could be read.
+    """
+    try:
+        from .ocr import read_name
+
+        ids, text = read_name(img, store)
+        if not ids:
+            ids, text_turned = read_name(img, store, upside_down=True)
+            text = " / ".join(t for t in (text, text_turned) if t)
+    except ImportError:
+        return None
+    except Exception as exc:  # never let the reader break a scan
+        log.warning("Reading the card name failed: %s", exc)
+        seen["nameRead"] = f"failed: {exc}"
+        return None
+    seen["nameRead"] = text
+    if not ids:
+        return None
+    if art is not None and art.card_id in ids:
+        # The weak art match agrees with the name: trust it a bit more.
+        return local_detection(art.card_id, "Medium", "name + image match")
+    m = index.best(img, only=set(ids))
+    if m is None:  # none of the cards with that name are in the image index
+        return local_detection(ids[0], "Low", "name") if len(ids) == 1 else None
+    seen["nameMatch"] = {"card": m.card_id, "score": round(m.score, 3), "runnersUp": m.runners_up}
+    # One card with that name: the name settles it. Several (reprints, other
+    # versions): the art picks one, so it's worth a look.
+    confidence = "Medium" if len(set(ids)) == 1 or (m.confidence in ("High", "Medium")) else "Low"
+    return local_detection(m.card_id, confidence, "name + image match")
 
 
 Recognise = Callable[[np.ndarray, object, ImageIndex | None], tuple[dict | None, dict]]
@@ -223,6 +267,8 @@ def describe(seen: dict) -> str:
         parts.append(f"closest art {m['card']} ({m['score']:.2f})")
     elif m:
         parts.append(m)  # e.g. the image index hasn't been built
+    if "nameRead" in seen:
+        parts.append(f'name read "{seen["nameRead"]}"' if seen["nameRead"] else "no name read")
     return "; ".join(parts)
 
 

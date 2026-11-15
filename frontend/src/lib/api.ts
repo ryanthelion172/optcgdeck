@@ -81,7 +81,7 @@ export async function deleteDeck(id: string): Promise<void> {
 
 export interface ScanResult {
   detected: number
-  /** `via`: how the card was identified: 'set code', 'image match' or 'CardSight'. */
+  /** `via`: how the card was identified: 'set code', 'image match', 'name + image match' or 'CardSight'. */
   cards: { id: string; count: number; confidence: 'High' | 'Medium' | 'Low'; via?: string[] }[]
   /**
    * Cards found but not identified. `image` is the crop the square detection cut out, as a data: URL;

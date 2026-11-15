@@ -100,16 +100,23 @@ class ImageIndex:
     def __len__(self) -> int:
         return len(self.ids)
 
-    def best(self, img: np.ndarray) -> Match | None:
-        """The closest card to the crop `img`, trying it both ways up."""
-        if not self.ids:
+    def best(self, img: np.ndarray, only: set[str] | None = None) -> Match | None:
+        """The closest card to the crop `img`, trying it both ways up.
+
+        With `only`, just those card ids are compared (e.g. every printing of a
+        name read off the card), so the lead needed is over those cards alone.
+        """
+        rows = np.arange(len(self.ids)) if only is None else np.array(
+            [i for i, card_id in enumerate(self.ids) if card_id in only], dtype=int
+        )
+        if not len(rows):
             return None
         views = [fingerprint(v) for z in ZOOMS for v in (zoom(img, z), zoom(cv2.rotate(img, cv2.ROTATE_180), z))]
-        scores = np.max(self.vectors @ np.stack(views).T, axis=1)
+        scores = np.max(self.vectors[rows] @ np.stack(views).T, axis=1)
         # Best score per card id (a card's alternate arts all count as that card).
         per_card: dict[str, float] = {}
         for i in np.argsort(-scores)[:50]:
-            per_card.setdefault(self.ids[i], float(scores[i]))
+            per_card.setdefault(self.ids[rows[i]], float(scores[i]))
         ranked = sorted(per_card.items(), key=lambda kv: -kv[1])
         card_id, score = ranked[0]
         lead = score - (ranked[1][1] if len(ranked) > 1 else 0.0)

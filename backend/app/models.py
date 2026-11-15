@@ -11,6 +11,8 @@ database refuses to delete a card that any deck still uses.
 - `card_printings`: every printed version of a card, the base art and each
   alternate art (e.g. OP01-016_p1), with its image. Only the backend uses
   them (photo scanning); the app is sent base arts only.
+- `card_names`: each card's name in other languages (e.g. Japanese), keyed by
+  card number, so a name read off a Japanese card can be looked up.
 - `users`: accounts. A deck belongs to a user (`owner_id`), or, for decks made
   without an account, to an "owner key": a random secret the app creates on
   the device, of which only a SHA-256 hash is saved.
@@ -126,11 +128,28 @@ class CardPrinting(Base):
     is_base: Mapped[bool] = mapped_column(Boolean, default=False)
     set_id: Mapped[str | None] = mapped_column(ForeignKey("sets.id", ondelete="SET NULL"))
     image_url: Mapped[str | None] = mapped_column(Text)
+    # Which region's card list it came from: "en" (North America/Europe), or for
+    # printings only listed elsewhere "en-asia", "ja", "zh-hk", "zh-tw", "th", "fr".
+    language: Mapped[str] = mapped_column(String(10), default="en", server_default="en")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     card: Mapped[Card] = relationship(back_populates="printings")
+
+
+class CardName(Base):
+    """A card's name in another language. Card numbers are the same in every
+    language, so the English card and its Japanese name share `card_id`."""
+
+    __tablename__ = "card_names"
+
+    card_id: Mapped[str] = mapped_column(ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True)
+    language: Mapped[str] = mapped_column(String(10), primary_key=True)  # "ja"
+    name: Mapped[str] = mapped_column(String(200), index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class User(Base):
