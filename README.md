@@ -12,7 +12,9 @@ OpenCV and crops it. Each crop is then identified, trying in order:
 
 1. **Set code:** reads the card number printed in the bottom-right corner (RapidOCR, runs locally).
 2. **Image match:** compares the card's art with every card's official image (runs locally; needs
-   the image index, see below).
+   the image index, see below). When that match is weak or missing, the card's **name** printed at
+   the bottom is read (RapidOCR again), and the art is compared with only the cards that have that
+   name. This works for English cards only.
 3. **CardSight:** the [CardSight AI](https://cardsight.ai) API, only for cards the first two
    couldn't place.
 

@@ -10,6 +10,7 @@ The OCR engine (RapidOCR) runs locally: no API calls.
 
 from __future__ import annotations
 
+import difflib
 import re
 import threading
 
@@ -80,3 +81,93 @@ def read_number(img: np.ndarray, store, upside_down: bool = False) -> tuple[str 
         if store.get(card_id):
             return card_id, text
     return None, text
+
+
+# The card's name is printed large, centred near the bottom, above its types
+# (Leaders, Characters and Events alike). The strip also takes in the types line
+# and the end of the effect text; those rarely look like a card name.
+NAME_STRIP = (0.70, 1.0)
+NAME_SIDES = (0.05, 0.95)
+MIN_NAME_SCORE = 0.8  # how alike the text read and a card name must be (0 to 1)
+_names_for: tuple[object, dict[str, list[str]], set[str]] | None = None  # (store, names, types)
+
+
+def _key(text: str) -> str:
+    """A name boiled down for comparing: lower case letters and digits only."""
+    return "".join(ch for ch in text.lower() if ch.isalnum())
+
+
+def _load_names(store) -> tuple[dict[str, list[str]], set[str]]:
+    global _names_for
+    if _names_for is None or _names_for[0] is not store:
+        by_name: dict[str, list[str]] = {}
+        types: set[str] = set()
+        for card in store.cards:
+            if key := _key(card.get("name") or ""):
+                by_name.setdefault(key, []).append(card["id"])
+            types.update(_key(t) for t in card.get("types") or [])
+        _names_for = (store, by_name, types)
+    return _names_for[1], _names_for[2]
+
+
+def names(store) -> dict[str, list[str]]:
+    """Each card name (as a key, see _key) and the ids of the cards with that name."""
+    return _load_names(store)[0]
+
+
+def _closest(key: str, choices, floor: float) -> tuple[str, float] | None:
+    """The choice most like `key` (difflib ratio), if any reaches `floor`."""
+    best, best_score = None, floor
+    matcher = difflib.SequenceMatcher(autojunk=False)
+    matcher.set_seq2(key)
+    for choice in choices:
+        # Cheap checks first: names much longer or shorter can't be close.
+        if 2 * min(len(choice), len(key)) / (len(choice) + len(key)) < best_score:
+            continue
+        matcher.set_seq1(choice)
+        if matcher.real_quick_ratio() >= best_score and matcher.quick_ratio() >= best_score:
+            score = matcher.ratio()
+            if score >= best_score:
+                best, best_score = choice, score
+    return (best, best_score) if best else None
+
+
+def match_name(text: str, store) -> tuple[str, float] | None:
+    """The card name (key) most like `text`, with how alike they are (0 to 1), or None.
+
+    Text that looks more like a type line ("Straw Hat Crew") than like any card
+    name is skipped, since some names contain a type.
+    """
+    key = _key(text)
+    if len(key) < 2:
+        return None
+    by_name, types = _load_names(store)
+    if key in by_name:
+        return key, 1.0
+    found = _closest(key, by_name, MIN_NAME_SCORE)
+    if found and (key in types or (_closest(key, types, found[1]) or ("", 0))[1] > found[1]):
+        return None
+    return found
+
+
+def read_name(img: np.ndarray, store, upside_down: bool = False) -> tuple[list[str], str]:
+    """Reads the card's name. Returns (ids of every card with that name, text read).
+
+    The ids list is empty when no line of text looks enough like a card name.
+    When several lines do (a type line can share a card's name), the tallest
+    text wins, since the name is printed larger than anything else down there.
+    """
+    if upside_down:
+        img = cv2.rotate(img, cv2.ROTATE_180)
+    h, w = img.shape[:2]
+    strip = img[int(h * NAME_STRIP[0]) : int(h * NAME_STRIP[1]), int(w * NAME_SIDES[0]) : int(w * NAME_SIDES[1])]
+    result, _ = _run(strip)
+    best = None  # (text height, score, name key)
+    lines = []
+    for box, text, _conf in result or []:
+        lines.append(text)
+        if found := match_name(text, store):
+            height = max(p[1] for p in box) - min(p[1] for p in box)
+            if best is None or (height, found[1]) > best[:2]:
+                best = (height, found[1], found[0])
+    return (names(store)[best[2]] if best else []), " ".join(lines)

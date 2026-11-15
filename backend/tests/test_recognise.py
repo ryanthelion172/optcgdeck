@@ -152,3 +152,117 @@ def test_big_photos_are_shrunk_before_reading():
     assert scan.shrink(big).shape[:2] == (880, 660)
     small = np.zeros((400, 300, 3), np.uint8)
     assert scan.shrink(small) is small
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Monkey.D.Luffy", "monkeydluffy"),
+        ("Monkey.D.Lufy", "monkeydluffy"),  # a letter dropped
+        ("Roronoa Zor0", "roronoazoro"),
+        ("Prisoner of lmpel Down", "prisonerofimpeldown"),
+        ("Straw Hat Crew", None),  # a types line, not a name
+        ("Big Mom Pirate", None),
+        ("2000", None),
+        ("CHARACTER", None),
+    ],
+)
+def test_names_are_matched_loosely(text, expected):
+    from app.ocr import match_name
+
+    found = match_name(text, store)
+    assert (found[0] if found else None) == expected
+
+
+def card_with_name(name: str) -> np.ndarray:
+    card = fake_card(2)
+    h, w = card.shape[:2]
+    cv2.putText(card, name, (int(w * 0.12), int(h * 0.88)), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (20, 20, 20), 2, cv2.LINE_AA)
+    cv2.putText(card, "Straw Hat Crew", (int(w * 0.3), int(h * 0.93)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (20, 20, 20), 1, cv2.LINE_AA)
+    return card
+
+
+def test_reads_the_card_name():
+    pytest.importorskip("rapidocr_onnxruntime")
+    from app.ocr import read_name
+
+    card = card_with_name("Sanji")
+    assert read_name(card, store)[0] == ["OP01-013"]
+    assert read_name(cv2.rotate(card, cv2.ROTATE_180), store, upside_down=True)[0] == ["OP01-013"]
+    assert sorted(read_name(card_with_name("Monkey.D.Luffy"), store)[0]) == ["OP05-119", "P-001", "ST01-001", "ST01-012"]
+
+
+class FakeIndex:
+    """Answers like ImageIndex.best: `weak` for the whole index, `named` within a name's cards."""
+
+    def __init__(self, weak, named=None):
+        self.weak, self.named, self.asked = weak, named, []
+
+    def best(self, img, only=None):
+        self.asked.append(only)
+        return self.weak if only is None else self.named
+
+
+def no_number(monkeypatch, name_ids):
+    from app import ocr
+
+    monkeypatch.setattr(ocr, "read_number", lambda img, store, upside_down=False: (None, ""))
+    monkeypatch.setattr(ocr, "read_name", lambda img, store, upside_down=False: (name_ids, "name"))
+
+
+def test_a_weak_art_match_falls_back_to_the_name(monkeypatch):
+    from app.match import Match
+
+    luffys = ["OP05-119", "P-001", "ST01-001", "ST01-012"]
+    no_number(monkeypatch, luffys)
+    index = FakeIndex(Match("OP01-016", 0.5, None, []), Match("ST01-012", 0.55, "Low", []))
+    found, seen = scan.recognise_card(fake_card(3), store, index)
+    assert index.asked == [None, set(luffys)]  # the art is compared with only the Luffys
+    assert found == scan.local_detection("ST01-012", "Low", "name + image match")  # several Luffys: worth a look
+    assert seen["nameRead"] == "name" and seen["nameMatch"]["card"] == "ST01-012"
+
+
+def test_a_name_with_one_card_settles_it(monkeypatch):
+    from app.match import Match
+
+    no_number(monkeypatch, ["OP01-013"])
+    index = FakeIndex(Match("OP01-016", 0.5, None, []), Match("OP01-013", 0.4, "Low", []))
+    found, _ = scan.recognise_card(fake_card(3), store, index)
+    assert found == scan.local_detection("OP01-013", "Medium", "name + image match")
+
+
+def test_a_low_art_match_that_the_name_agrees_with_is_kept(monkeypatch):
+    from app.match import Match
+
+    no_number(monkeypatch, ["OP01-016"])
+    index = FakeIndex(Match("OP01-016", 0.61, "Low", []))
+    found, _ = scan.recognise_card(fake_card(3), store, index)
+    assert found == scan.local_detection("OP01-016", "Medium", "name + image match")
+    assert index.asked == [None]
+
+
+def test_strong_art_matches_skip_the_name(monkeypatch):
+    from app.match import Match
+
+    no_number(monkeypatch, ["OP01-013"])
+    index = FakeIndex(Match("OP01-016", 0.8, "High", []))
+    found, seen = scan.recognise_card(fake_card(3), store, index)
+    assert found["via"] == "image match" and "nameRead" not in seen
+
+
+def test_no_name_read_keeps_a_low_art_match(monkeypatch):
+    from app.match import Match
+
+    no_number(monkeypatch, [])
+    index = FakeIndex(Match("OP01-016", 0.61, "Low", []))
+    found, seen = scan.recognise_card(fake_card(3), store, index)
+    assert found == scan.local_detection("OP01-016", "Low", "image match")
+    assert scan.describe(seen) == 'No number read; closest art OP01-016 (0.61); name read "name / name"'
+
+
+def test_image_match_can_be_limited_to_some_cards():
+    cards = [fake_card(i) for i in range(5)]
+    index = ImageIndex([f"C{i}" for i in range(5)], np.stack([fingerprint(c) for c in cards]))
+    m = index.best(photo_of(cards[1]), only={"C3", "C4"})
+    assert m.card_id in {"C3", "C4"}
+    assert index.best(photo_of(cards[1]), only={"nope"}) is None
