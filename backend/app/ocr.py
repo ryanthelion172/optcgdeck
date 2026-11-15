@@ -89,6 +89,9 @@ def read_number(img: np.ndarray, store, upside_down: bool = False) -> tuple[str 
 NAME_STRIP = (0.70, 1.0)
 NAME_SIDES = (0.05, 0.95)
 MIN_NAME_SCORE = 0.8  # how alike the text read and a card name must be (0 to 1)
+# Reads this short (e.g. "A/PS" from a smudge) are alike too many short names
+# ("Apis", "Yu", "Ohm") by chance, so they only count when they match exactly.
+EXACT_BELOW = 5
 _names_for: tuple[object, dict[str, list[str]], set[str]] | None = None  # (store, names, types)
 
 
@@ -132,42 +135,63 @@ def _closest(key: str, choices, floor: float) -> tuple[str, float] | None:
     return (best, best_score) if best else None
 
 
-def match_name(text: str, store) -> tuple[str, float] | None:
-    """The card name (key) most like `text`, with how alike they are (0 to 1), or None.
+def match_name(text: str, store) -> tuple[str, float, bool] | None:
+    """The card name (key) most like `text`, how alike they are (0 to 1), and whether
+    the text could just as well be a types line. None if no name is close.
 
-    Text that looks more like a type line ("Straw Hat Crew") than like any card
-    name is skipped, since some names contain a type.
+    About 20 card names are also types ("Impel Down", "Baroque Works", "Rocks
+    Pirates"), so a types line can look exactly like a name; read_name decides
+    those by text size. Text more like a type than any name is skipped.
     """
     key = _key(text)
     if len(key) < 2:
         return None
     by_name, types = _load_names(store)
     if key in by_name:
-        return key, 1.0
-    found = _closest(key, by_name, MIN_NAME_SCORE)
-    if found and (key in types or (_closest(key, types, found[1]) or ("", 0))[1] > found[1]):
+        found = (key, 1.0)
+    elif len(key) < EXACT_BELOW:
         return None
-    return found
+    else:
+        found = _closest(key, by_name, MIN_NAME_SCORE)
+    if not found:
+        return None
+    type_score = 1.0 if key in types else (_closest(key, types, found[1]) or ("", 0.0))[1]
+    if type_score > found[1]:
+        return None
+    return found[0], found[1], type_score >= found[1]
+
+
+# The name is printed about twice the size of the types line and effect text. A
+# line that could be either a name or a types line counts as the name only if
+# it's clearly bigger than the other text around it.
+NAME_SIZE = 1.4
 
 
 def read_name(img: np.ndarray, store, upside_down: bool = False) -> tuple[list[str], str]:
     """Reads the card's name. Returns (ids of every card with that name, text read).
 
     The ids list is empty when no line of text looks enough like a card name.
-    When several lines do (a type line can share a card's name), the tallest
-    text wins, since the name is printed larger than anything else down there.
+    When several lines do, the tallest text wins, since the name is printed
+    larger than anything else down there. A line that is also a type (e.g.
+    "Impel Down") is only taken when it's printed name-sized, so the types line
+    under an unreadable name isn't mistaken for it.
     """
     if upside_down:
         img = cv2.rotate(img, cv2.ROTATE_180)
     h, w = img.shape[:2]
     strip = img[int(h * NAME_STRIP[0]) : int(h * NAME_STRIP[1]), int(w * NAME_SIDES[0]) : int(w * NAME_SIDES[1])]
     result, _ = _run(strip)
+    lines = [(text, max(p[1] for p in box) - min(p[1] for p in box)) for box, text, _conf in result or []]
     best = None  # (text height, score, name key)
-    lines = []
-    for box, text, _conf in result or []:
-        lines.append(text)
-        if found := match_name(text, store):
-            height = max(p[1] for p in box) - min(p[1] for p in box)
-            if best is None or (height, found[1]) > best[:2]:
-                best = (height, found[1], found[0])
-    return (names(store)[best[2]] if best else []), " ".join(lines)
+    for i, (text, height) in enumerate(lines):
+        found = match_name(text, store)
+        if not found:
+            continue
+        key, score, could_be_type = found
+        if could_be_type:
+            others = sorted(hgt for j, (_, hgt) in enumerate(lines) if j != i)
+            if not others or height < NAME_SIZE * others[len(others) // 2]:
+                continue
+        if best is None or (height, score) > best[:2]:
+            best = (height, score, key)
+    return (names(store)[best[2]] if best else []), " ".join(text for text, _ in lines)

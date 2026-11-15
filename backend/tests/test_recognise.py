@@ -266,3 +266,32 @@ def test_image_match_can_be_limited_to_some_cards():
     m = index.best(photo_of(cards[1]), only={"C3", "C4"})
     assert m.card_id in {"C3", "C4"}
     assert index.best(photo_of(cards[1]), only={"nope"}) is None
+
+
+def test_short_reads_must_match_exactly():
+    from app.ocr import match_name
+
+    assert match_name("Nami", store)[0] == "nami"
+    assert match_name("Nmi", store) is None  # too short to trust a near miss
+
+
+def test_a_types_line_is_not_taken_for_the_name():
+    pytest.importorskip("rapidocr_onnxruntime")
+    from app.ocr import read_name
+
+    # "Impel Down" is both a type and a card name (OP16-042's name is "Prisoner of
+    # Impel Down", and the sample has no card called "Impel Down", so add one).
+    cards = [*SAMPLE_CARDS, {**SAMPLE_CARDS[0], "id": "OP99-001", "name": "Impel Down", "types": ["Impel Down"]}]
+    with_type = CardStore(cards)
+    card = fake_card(4)
+    h, w = card.shape[:2]
+    cv2.rectangle(card, (0, int(h * 0.7)), (w, h), (235, 235, 235), -1)
+    effect = (int(w * 0.08), int(h * 0.76))
+    cv2.putText(card, "Draw 1 card and trash 1 card.", effect, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (20, 20, 20), 1, cv2.LINE_AA)
+    types_line = (int(w * 0.33), int(h * 0.94))
+    cv2.putText(card, "Impel Down", types_line, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (20, 20, 20), 1, cv2.LINE_AA)
+    # The name above it is unreadable (glare): the types line must not stand in for it.
+    assert read_name(card, with_type)[0] == []
+    # Printed name-sized, the same words are the card's name.
+    cv2.putText(card, "Impel Down", (int(w * 0.2), int(h * 0.88)), cv2.FONT_HERSHEY_SIMPLEX, 1.3, (20, 20, 20), 2, cv2.LINE_AA)
+    assert read_name(card, with_type)[0] == ["OP99-001"]
