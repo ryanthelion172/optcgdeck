@@ -11,6 +11,7 @@ import asyncio
 import logging
 import re
 import uuid
+from urllib.parse import urlsplit
 from pathlib import Path
 
 import httpx
@@ -43,6 +44,15 @@ def source_urls(card: dict) -> list[str]:
         f"https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com/one-piece/{set_code}/{card['id']}_EN.webp"
     )
     return urls
+
+
+def referer_for(url: str) -> str:
+    """The card list page an image is shown on. Each region's official site
+    (en., asia-en., fr., www. for Japan, ...) expects its own."""
+    host = urlsplit(url).hostname or ""
+    if host.endswith("onepiece-cardgame.com"):
+        return f"https://{host}/cardlist/"
+    return HEADERS["Referer"]
 
 
 def cached_file(card_id: str) -> Path | None:
@@ -99,7 +109,7 @@ async def _download(card: dict) -> Path | None:
     client = get_client()
     for url in source_urls(card):
         try:
-            resp = await client.get(url)
+            resp = await client.get(url, headers={"Referer": referer_for(url)})
         except httpx.HTTPError as exc:
             log.warning("Image download failed for %s from %s: %s", card_id, url, exc)
             continue

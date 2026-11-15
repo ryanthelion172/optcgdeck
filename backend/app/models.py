@@ -128,6 +128,9 @@ class CardPrinting(Base):
     is_base: Mapped[bool] = mapped_column(Boolean, default=False)
     set_id: Mapped[str | None] = mapped_column(ForeignKey("sets.id", ondelete="SET NULL"))
     image_url: Mapped[str | None] = mapped_column(Text)
+    # Which region's card list it came from: "en" (North America/Europe), or for
+    # printings only listed elsewhere "en-asia", "ja", "zh-hk", "zh-tw", "th", "fr".
+    language: Mapped[str] = mapped_column(String(10), default="en", server_default="en")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

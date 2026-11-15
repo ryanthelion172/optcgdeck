@@ -1,4 +1,5 @@
-"""add card_names: each card's name in other languages (Japanese for now)
+"""add card_names (each card's name in other languages, Japanese for now) and
+card_printings.language (which region's card list a printing came from)
 
 Filled by scripts/import_cards.py, so run it after upgrading.
 
@@ -29,8 +30,10 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("card_id", "language"),
     )
     op.create_index("ix_card_names_name", "card_names", ["name"])
+    op.add_column("card_printings", sa.Column("language", sa.String(length=10), server_default="en", nullable=False))
 
 
 def downgrade() -> None:
+    op.drop_column("card_printings", "language")
     op.drop_index("ix_card_names_name", table_name="card_names")
     op.drop_table("card_names")

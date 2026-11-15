@@ -69,6 +69,9 @@ stored online. It holds these tables:
   `scripts/import_cards.py`. `set_id` points at the set it first came out in.
 - `card_printings`: every printed version of a card, the base art and each alternate art
   (e.g. `OP01-016_p1`), with its image. Photo scanning uses these; the app is only sent base arts.
+  Besides the English (North America/Europe) list, the import adds alternate arts that only the
+  other regions' lists have (English Asia, Japanese, Chinese, Thai, French), such as Asia-only
+  "Limited Product Card" arts. `language` says which list each printing came from.
 - `card_names`: each card's name in other languages, keyed by card number (Japanese for now, e.g.
   `OP01-016` → ナミ). Card numbers are the same in every language, so `scripts/import_cards.py`
   fills it from the Japanese card list in the same dataset. Sets that aren't in the Japanese list
