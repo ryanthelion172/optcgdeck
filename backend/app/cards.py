@@ -17,7 +17,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from .db import database_url, session_factory
-from .models import Card, CardPrinting, Set
+from .models import Card, CardName, CardPrinting, Set
 
 
 class CardStore:
@@ -99,3 +99,33 @@ def upsert_cards(db: Session, cards: list[dict], sets: list[dict] | None = None)
     _upsert(db, CardPrinting, printings)
     db.commit()
     return len(rows)
+
+
+def upsert_card_names(db: Session, names: dict[str, str], language: str) -> int:
+    """Saves each card's name in `language` ({card id: name}), for cards we have.
+
+    Names for card numbers that aren't in `cards` (e.g. Japanese-only cards) are
+    skipped. Returns how many were saved. Never deletes anything.
+    """
+    known = set(db.scalars(select(Card.id)))
+    rows = [{"card_id": cid, "language": language, "name": name} for cid, name in names.items() if cid in known and name]
+    for start in range(0, len(rows), 500):
+        stmt = insert(CardName).values(rows[start : start + 500])
+        db.execute(
+            stmt.on_conflict_do_update(
+                index_elements=[CardName.card_id, CardName.language],
+                set_={"name": stmt.excluded.name, "updated_at": func.now()},
+            )
+        )
+    db.commit()
+    return len(rows)
+
+
+def load_card_names(db: Session, language: str) -> dict[str, list[str]]:
+    """Each name in `language` and the ids of the cards with it, e.g. {"ナミ": ["OP01-016", ...]}."""
+    by_name: dict[str, list[str]] = {}
+    for card_id, name in db.execute(
+        select(CardName.card_id, CardName.name).where(CardName.language == language).order_by(CardName.card_id)
+    ):
+        by_name.setdefault(name, []).append(card_id)
+    return by_name

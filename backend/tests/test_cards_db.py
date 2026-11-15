@@ -94,3 +94,17 @@ def test_decks_can_belong_to_a_user(database):
         db.delete(db.get(User, user.id))  # deleting an account deletes its decks
         db.commit()
         assert db.scalars(select(Deck).where(Deck.name == "Account deck")).all() == []
+
+
+def test_japanese_names_are_saved_by_card_number(database):
+    from app.cards import load_card_names, upsert_card_names
+    from app.models import CardName
+
+    names = {"OP01-016": "ナミ", "OP01-013": "サンジ", "OP99-001": "日本だけのカード"}  # the last isn't in English
+    with database.session_factory()() as db:
+        assert upsert_card_names(db, names, "ja") == 2
+        assert upsert_card_names(db, {"OP01-016": "ナミ（新）"}, "ja") == 1  # a later import updates it
+        assert load_card_names(db, "ja") == {"ナミ（新）": ["OP01-016"], "サンジ": ["OP01-013"]}
+        assert load_card_names(db, "fr") == {}
+        db.execute(delete(CardName))
+        db.commit()

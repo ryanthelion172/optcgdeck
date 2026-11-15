@@ -3,8 +3,10 @@
 Source: the Punk Records dataset (https://github.com/buhbbl/punk-records),
 which is generated from the official Bandai card list.
 
-Fills three tables: `sets` (each pack or deck), `cards` (one per card number)
-and `card_printings` (the base art and every alternate art, with images).
+Fills four tables: `sets` (each pack or deck), `cards` (one per card number),
+`card_printings` (the base art and every alternate art, with images) and
+`card_names` (each card's Japanese name, from the dataset's Japanese card list,
+matched by card number).
 
 New cards are added and changed cards are updated. Cards are never deleted,
 so decks that use them keep working even if the source drops a card.
@@ -19,6 +21,7 @@ from __future__ import annotations
 import html
 import json
 import sys
+import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -28,10 +31,12 @@ from dotenv import load_dotenv
 BACKEND = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND))
 
-from app.cards import upsert_cards  # noqa: E402
+from app.cards import upsert_card_names, upsert_cards  # noqa: E402
 from app.db import database_url, session_factory  # noqa: E402
 
-BASE = "https://raw.githubusercontent.com/buhbbl/punk-records/main/english"
+ROOT = "https://raw.githubusercontent.com/buhbbl/punk-records/main"
+BASE = f"{ROOT}/english"
+JAPANESE = f"{ROOT}/japanese/data"
 
 
 def fetch_json(url: str):
@@ -86,6 +91,44 @@ def to_card(raw: dict, set_id: str | None) -> dict:
     }
 
 
+def fetch_pack(url: str) -> list[dict] | None:
+    """A pack's cards, or None if there's no such pack."""
+    try:
+        return fetch_json(url)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+
+
+def japanese_names(english_packs: dict) -> dict[str, str]:
+    """Every Japanese card's name, by card number (the same number as the English card).
+
+    The Japanese data has one file per pack, numbered like the English packs but
+    starting "550" (English "569101" is Japanese "550101"). Japan gets sets first,
+    so each series is read past the last English pack until a few numbers in a row
+    are missing.
+    """
+    series = "0123456789"  # 550001.., 550101.., ... (some series exist only in Japanese)
+    names: dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        for s in series:
+            number, misses = 1, 0
+            while misses < 3:
+                batch = [f"550{s}{n:02d}" for n in range(number, number + 8)]
+                for pack in pool.map(lambda p: fetch_pack(f"{JAPANESE}/{p}.json"), batch):
+                    if pack is None:
+                        misses += 1
+                        continue
+                    misses = 0
+                    for card in pack:
+                        # Alternate arts ("OP01-016_p1") have the same name as their card.
+                        if "_" not in card["id"] and card.get("name"):
+                            names[card["id"]] = clean(card["name"])
+                number += 8
+    return names
+
+
 def main() -> int:
     load_dotenv(BACKEND / ".env")
     if database_url() is None:
@@ -134,6 +177,15 @@ def main() -> int:
         saved = upsert_cards(db, list(cards.values()), sets)
     missing = len(base_ids) - len(cards)
     print(f"saved {len(sets)} sets, {saved} cards and {alts} alternate arts ({missing} cards failed to download)")
+
+    try:
+        ja = japanese_names(packs)
+    except Exception as exc:  # the English cards are saved; don't fail the import over names
+        print(f"Couldn't download Japanese names: {exc}", file=sys.stderr)
+    else:
+        with session_factory()() as db:
+            named = upsert_card_names(db, ja, "ja")
+        print(f"saved Japanese names for {named} cards ({len(ja) - named} Japanese-only cards skipped)")
     return 1 if missing else 0
 
 

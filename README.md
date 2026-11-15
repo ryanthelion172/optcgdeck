@@ -69,6 +69,10 @@ stored online. It holds these tables:
   `scripts/import_cards.py`. `set_id` points at the set it first came out in.
 - `card_printings`: every printed version of a card, the base art and each alternate art
   (e.g. `OP01-016_p1`), with its image. Photo scanning uses these; the app is only sent base arts.
+- `card_names`: each card's name in other languages, keyed by card number (Japanese for now, e.g.
+  `OP01-016` → ナミ). Card numbers are the same in every language, so `scripts/import_cards.py`
+  fills it from the Japanese card list in the same dataset. Sets that aren't in the Japanese list
+  yet (at the moment OP18 and EB05) have no Japanese names until a later import.
 - `users`: accounts (email, display name, password hash). Sign-up and sign-in aren't built yet.
 - `decks`: each deck's name, Leader and owner.
 - `deck_cards`: how many copies of each card a deck has.
