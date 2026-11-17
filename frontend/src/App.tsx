@@ -299,7 +299,7 @@ function Builder({
         />
       )}
       {showScan && (
-        <ScanModal lookup={lookup} deckNames={decks.map((d) => d.name)} onCreate={createFromScan} onClose={() => setShowScan(false)} />
+        <ScanModal cards={cards} lookup={lookup} deckNames={decks.map((d) => d.name)} onCreate={createFromScan} onClose={() => setShowScan(false)} />
       )}
       {showList && (
         <DecklistModal

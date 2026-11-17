@@ -3,9 +3,12 @@ import type { Card } from '../types'
 import { scanPhoto, type ScanMode, type ScanResult } from '../lib/api'
 import { defaultDeckName, maxCopies, type CardLookup } from '../lib/deck'
 import { CardImage } from './CardImage'
+import { CardSearch } from './CardSearch'
 import { Button, Modal } from './ui'
 
 interface Props {
+  /** Every card, for searching by hand when the scan's guess is wrong. */
+  cards: Card[]
   lookup: CardLookup
   /** Names already used, so a default 'New deck N' doesn't repeat one. */
   deckNames: string[]
@@ -15,7 +18,7 @@ interface Props {
 
 type Row = { card: Card; count: number; confidence: string; via: string[] }
 
-export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
+export function ScanModal({ cards, lookup, deckNames, onCreate, onClose }: Props) {
   const [mode, setMode] = useState<ScanMode>('deck')
   const [photo, setPhoto] = useState<File | null>(null)
   const [preview, setPreview] = useState('')
@@ -82,12 +85,11 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
   const setCount = (id: string, count: number) =>
     setRows((rs) => rs.map((r) => (r.card.id === id ? { ...r, count: Math.max(0, Math.min(maxCopies(id), count)) } : r)))
 
-  /** The user says the closest card is right: add one copy of it to the deck. */
-  const accept = (i: number, card: Card) => {
+  /** The user confirmed the closest card, or searched for the right one: add one copy of it to the deck. */
+  const accept = (i: number, card: Card, via = 'confirmed by you') => {
     setAnswers((a) => ({ ...a, [i]: 'yes' }))
     setZoomed((z) => (z === i ? null : z))
     setRows((rs) => {
-      const via = 'confirmed by you'
       const existing = rs.find((r) => r.card.id === card.id)
       if (!existing) return [...rs, { card, count: 1, confidence: 'High', via: [via] }]
       return rs.map((r) =>
@@ -252,56 +254,67 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
               {result.note && <p className="shrink-0 text-sm text-amber-300">{result.note}</p>}
               {misses.length > 0 && (
                 <div className="shrink-0 text-sm text-amber-300">
-                  Couldn't match {misses.length} card{misses.length === 1 ? '' : 's'}. Confirm the closest card, or add{' '}
-                  {misses.length === 1 ? 'it' : 'them'} by hand:
+                  Couldn't match {misses.length} card{misses.length === 1 ? '' : 's'}. Confirm the closest card, or search for{' '}
+                  {misses.length === 1 ? 'it' : 'them'}:
                   <ul className="mt-2 flex flex-wrap gap-3 text-slate-400">
                     {misses.map((u) => {
                       const i = u.i
                       const guess = u.closest && answers[i] !== 'no' ? lookup(u.closest) : undefined
+                      const searching = !guess
                       return (
-                        <li key={i} className={`flex flex-col gap-1 ${zoomed === i ? 'w-64' : 'w-28'}`}>
-                          {u.image ? (
-                            <button type="button" onClick={() => setZoomed(zoomed === i ? null : i)} title="Click to enlarge">
-                              <img
-                                src={u.image}
-                                alt={`What the scan cut out for: ${u.label}`}
-                                className="aspect-[63/88] w-full rounded border border-slate-700 bg-slate-950 object-contain"
-                              />
-                            </button>
-                          ) : (
-                            <div className="flex aspect-[63/88] w-full items-center justify-center rounded border border-dashed border-slate-700 p-1 text-center text-xs text-slate-500">
-                              No card outline found
-                            </div>
-                          )}
-                          <span className="text-xs leading-tight">{u.label}</span>
-                          {u.detail && <span className="text-xs leading-tight text-slate-500">{u.detail}</span>}
-                          {guess && (
-                            <div className="mt-1 flex flex-col gap-1 rounded border border-slate-700 bg-slate-900 p-1.5">
-                              <span className="text-xs font-medium text-slate-200">Is this the card?</span>
-                              <CardImage card={guess} showText={false} className="!rounded" />
-                              <span className="text-xs leading-tight text-slate-300">
-                                {guess.name} <span className="text-slate-500">{guess.id}</span>
-                              </span>
-                              <div className="flex gap-2">
-                                <button
-                                  type="button"
-                                  aria-label={`Yes, it's ${guess.name}: add it to the deck`}
-                                  title="Yes, add it to the deck"
-                                  onClick={() => accept(i, guess)}
-                                  className="flex h-8 flex-1 items-center justify-center rounded bg-green-700 text-lg font-bold text-white hover:bg-green-600"
-                                >
-                                  ✓
-                                </button>
-                                <button
-                                  type="button"
-                                  aria-label={`No, it's not ${guess.name}`}
-                                  title="No, it's a different card"
-                                  onClick={() => setAnswers((a) => ({ ...a, [i]: 'no' }))}
-                                  className="flex h-8 flex-1 items-center justify-center rounded bg-red-700 text-lg font-bold text-white hover:bg-red-600"
-                                >
-                                  ✗
-                                </button>
+                        <li key={i} className="flex flex-wrap gap-2">
+                          <div className={`flex flex-col gap-1 ${zoomed === i ? 'w-64' : 'w-28'}`}>
+                            {u.image ? (
+                              <button type="button" onClick={() => setZoomed(zoomed === i ? null : i)} title="Click to enlarge">
+                                <img
+                                  src={u.image}
+                                  alt={`What the scan cut out for: ${u.label}`}
+                                  className="aspect-[63/88] w-full rounded border border-slate-700 bg-slate-950 object-contain"
+                                />
+                              </button>
+                            ) : (
+                              <div className="flex aspect-[63/88] w-full items-center justify-center rounded border border-dashed border-slate-700 p-1 text-center text-xs text-slate-500">
+                                No card outline found
                               </div>
+                            )}
+                            <span className="text-xs leading-tight">{u.label}</span>
+                            {u.detail && <span className="text-xs leading-tight text-slate-500">{u.detail}</span>}
+                            {guess && (
+                              <div className="mt-1 flex flex-col gap-1 rounded border border-slate-700 bg-slate-900 p-1.5">
+                                <span className="text-xs font-medium text-slate-200">Is this the card?</span>
+                                <CardImage card={guess} showText={false} className="!rounded" />
+                                <span className="text-xs leading-tight text-slate-300">
+                                  {guess.name} <span className="text-slate-500">{guess.id}</span>
+                                </span>
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    aria-label={`Yes, it's ${guess.name}: add it to the deck`}
+                                    title="Yes, add it to the deck"
+                                    onClick={() => accept(i, guess)}
+                                    className="flex h-8 flex-1 items-center justify-center rounded bg-green-700 text-lg font-bold text-white hover:bg-green-600"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    aria-label={`No, it's not ${guess.name}`}
+                                    title="No, it's a different card"
+                                    onClick={() => setAnswers((a) => ({ ...a, [i]: 'no' }))}
+                                    className="flex h-8 flex-1 items-center justify-center rounded bg-red-700 text-lg font-bold text-white hover:bg-red-600"
+                                  >
+                                    ✗
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          {searching && (
+                            <div className="flex w-60 flex-col gap-1 self-start rounded border border-slate-700 bg-slate-900 p-1.5">
+                              <span className="text-xs font-medium text-slate-200">
+                                {answers[i] === 'no' ? 'Which card is it? Search to add it:' : 'Search for the card to add it:'}
+                              </span>
+                              <CardSearch cards={cards} label={`Search for ${u.label}`} onPick={(card) => accept(i, card, 'picked by you')} />
                             </div>
                           )}
                         </li>
