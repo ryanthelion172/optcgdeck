@@ -27,6 +27,8 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
   // The unmatched card shown large, if any.
   const [zoomed, setZoomed] = useState<number | null>(null)
   // What the user said about each unmatched card's closest-card guess, by its index.
+  // The scanned photo shown full size, to compare against the counts.
+  const [photoOpen, setPhotoOpen] = useState(false)
   const [answers, setAnswers] = useState<Record<number, 'yes' | 'no'>>({})
   // Counts scans, so a slow answer for an older photo is ignored.
   const scanId = useRef(0)
@@ -62,6 +64,7 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
       })
       setResult(res)
       setZoomed(null)
+      setPhotoOpen(false)
       setAnswers({})
       setRows(found)
       setName(defaultDeckName(found.find((r) => r.card.category === 'Leader')?.card, deckNames))
@@ -170,118 +173,145 @@ export function ScanModal({ lookup, deckNames, onCreate, onClose }: Props) {
 
       {result && (
         <div className="flex min-h-0 flex-1 flex-col gap-3">
-          <p className="text-sm text-slate-400">
-            Found {result.detected} card{result.detected === 1 ? '' : 's'}. Check the list, fix any counts, then
-            create the deck. You can keep editing it afterwards.
-          </p>
-          <label className="flex shrink-0 flex-col gap-1 text-sm">
-            <span className="text-slate-400">Deck name</span>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              maxLength={100}
-              className="rounded-lg bg-slate-800 px-3 py-2"
-            />
-          </label>
-          <p className="text-sm">
-            Leader: <span className="font-semibold">{leaderRow ? leaderRow.card.name : 'none found, pick one after'}</span>
-            {leaderRow && leaderRow.via.length > 0 && (
-              <span className="ml-2 text-xs text-slate-500">via {leaderRow.via.join(', ')}</span>
+          <div className="flex shrink-0 items-start gap-3">
+            <p className="flex-1 text-sm text-slate-400">
+              Found {result.detected} card{result.detected === 1 ? '' : 's'}. Check the list against your photo, fix
+              any counts, then create the deck. You can keep editing it afterwards.
+            </p>
+            {preview && (
+              <button
+                type="button"
+                onClick={() => setPhotoOpen((o) => !o)}
+                aria-expanded={photoOpen}
+                title={photoOpen ? 'Click to hide the large photo' : 'Click to enlarge your photo'}
+                className="shrink-0 overflow-hidden rounded border border-slate-700 hover:border-slate-400"
+              >
+                <img src={preview} alt="Your scanned photo" className="h-16 w-24 bg-slate-950 object-contain" />
+              </button>
             )}
-            <span className="ml-3 text-slate-400">{total} main-deck cards</span>
-          </p>
-          <ul className="min-h-0 flex-1 divide-y divide-slate-800 overflow-y-auto rounded-lg bg-slate-950">
-            {mainRows.map((r) => (
-              <li key={r.card.id} className="flex items-center gap-2 px-2 py-1.5">
-                <CardImage card={r.card} className="!w-10 shrink-0" showText={false} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm">{r.card.name}</span>
-                  <span className="text-xs text-slate-500">
-                    {r.card.id}
-                    {r.via.length > 0 && <span className="ml-2">via {r.via.join(', ')}</span>}
-                    {r.confidence !== 'High' && <span className="block text-amber-300">{r.confidence} confidence</span>}
-                  </span>
-                </span>
-                <button
-                  aria-label={`Remove one ${r.card.name}`}
-                  onClick={() => setCount(r.card.id, r.count - 1)}
-                  className="h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700"
-                >
-                  −
-                </button>
-                <span className="w-5 text-center font-semibold">{r.count}</span>
-                <button
-                  aria-label={`Add one ${r.card.name}`}
-                  onClick={() => setCount(r.card.id, r.count + 1)}
-                  className="h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700"
-                >
-                  +
-                </button>
-              </li>
-            ))}
-            {mainRows.length === 0 && <li className="p-3 text-sm text-slate-400">No main-deck cards recognised.</li>}
-          </ul>
-          {result.note && <p className="shrink-0 text-sm text-amber-300">{result.note}</p>}
-          {misses.length > 0 && (
-            <div className="max-h-96 shrink-0 overflow-y-auto text-sm text-amber-300">
-              Couldn't match {misses.length} card{misses.length === 1 ? '' : 's'}. Confirm the closest card, or add{' '}
-              {misses.length === 1 ? 'it' : 'them'} by hand:
-              <ul className="mt-2 flex flex-wrap gap-3 text-slate-400">
-                {misses.map((u) => {
-                  const i = u.i
-                  const guess = u.closest && answers[i] !== 'no' ? lookup(u.closest) : undefined
-                  return (
-                    <li key={i} className={`flex flex-col gap-1 ${zoomed === i ? 'w-64' : 'w-28'}`}>
-                      {u.image ? (
-                        <button type="button" onClick={() => setZoomed(zoomed === i ? null : i)} title="Click to enlarge">
-                          <img
-                            src={u.image}
-                            alt={`What the scan cut out for: ${u.label}`}
-                            className="aspect-[63/88] w-full rounded border border-slate-700 bg-slate-950 object-contain"
-                          />
-                        </button>
-                      ) : (
-                        <div className="flex aspect-[63/88] w-full items-center justify-center rounded border border-dashed border-slate-700 p-1 text-center text-xs text-slate-500">
-                          No card outline found
-                        </div>
-                      )}
-                      <span className="text-xs leading-tight">{u.label}</span>
-                      {u.detail && <span className="text-xs leading-tight text-slate-500">{u.detail}</span>}
-                      {guess && (
-                        <div className="mt-1 flex flex-col gap-1 rounded border border-slate-700 bg-slate-900 p-1.5">
-                          <span className="text-xs font-medium text-slate-200">Is this the card?</span>
-                          <CardImage card={guess} showText={false} className="!rounded" />
-                          <span className="text-xs leading-tight text-slate-300">
-                            {guess.name} <span className="text-slate-500">{guess.id}</span>
-                          </span>
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              aria-label={`Yes, it's ${guess.name}: add it to the deck`}
-                              title="Yes, add it to the deck"
-                              onClick={() => accept(i, guess)}
-                              className="flex h-8 flex-1 items-center justify-center rounded bg-green-700 text-lg font-bold text-white hover:bg-green-600"
-                            >
-                              ✓
-                            </button>
-                            <button
-                              type="button"
-                              aria-label={`No, it's not ${guess.name}`}
-                              title="No, it's a different card"
-                              onClick={() => setAnswers((a) => ({ ...a, [i]: 'no' }))}
-                              className="flex h-8 flex-1 items-center justify-center rounded bg-red-700 text-lg font-bold text-white hover:bg-red-600"
-                            >
-                              ✗
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </li>
-                  )
-                })}
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col gap-3 sm:flex-row">
+            {photoOpen && preview && (
+              <button
+                type="button"
+                onClick={() => setPhotoOpen(false)}
+                title="Click to make the photo small again"
+                className="h-[25vh] shrink-0 cursor-zoom-out overflow-hidden rounded-lg bg-slate-950 sm:h-auto sm:w-1/2"
+              >
+                <img src={preview} alt="Your scanned photo, enlarged" className="h-full w-full object-contain" />
+              </button>
+            )}
+            <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+              <label className="flex shrink-0 flex-col gap-1 text-sm">
+                <span className="text-slate-400">Deck name</span>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  maxLength={100}
+                  className="rounded-lg bg-slate-800 px-3 py-2"
+                />
+              </label>
+              <p className="text-sm">
+                Leader: <span className="font-semibold">{leaderRow ? leaderRow.card.name : 'none found, pick one after'}</span>
+                {leaderRow && leaderRow.via.length > 0 && (
+                  <span className="ml-2 text-xs text-slate-500">via {leaderRow.via.join(', ')}</span>
+                )}
+                <span className="ml-3 text-slate-400">{total} main-deck cards</span>
+              </p>
+              <ul className="shrink-0 divide-y divide-slate-800 rounded-lg bg-slate-950">
+                {mainRows.map((r) => (
+                  <li key={r.card.id} className="flex items-center gap-2 px-2 py-1.5">
+                    <CardImage card={r.card} className="!w-10 shrink-0" showText={false} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm">{r.card.name}</span>
+                      <span className="text-xs text-slate-500">
+                        {r.card.id}
+                        {r.via.length > 0 && <span className="ml-2">via {r.via.join(', ')}</span>}
+                        {r.confidence !== 'High' && <span className="block text-amber-300">{r.confidence} confidence</span>}
+                      </span>
+                    </span>
+                    <button
+                      aria-label={`Remove one ${r.card.name}`}
+                      onClick={() => setCount(r.card.id, r.count - 1)}
+                      className="h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700"
+                    >
+                      −
+                    </button>
+                    <span className="w-5 text-center font-semibold">{r.count}</span>
+                    <button
+                      aria-label={`Add one ${r.card.name}`}
+                      onClick={() => setCount(r.card.id, r.count + 1)}
+                      className="h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700"
+                    >
+                      +
+                    </button>
+                  </li>
+                ))}
+                {mainRows.length === 0 && <li className="p-3 text-sm text-slate-400">No main-deck cards recognised.</li>}
               </ul>
+              {result.note && <p className="shrink-0 text-sm text-amber-300">{result.note}</p>}
+              {misses.length > 0 && (
+                <div className="shrink-0 text-sm text-amber-300">
+                  Couldn't match {misses.length} card{misses.length === 1 ? '' : 's'}. Confirm the closest card, or add{' '}
+                  {misses.length === 1 ? 'it' : 'them'} by hand:
+                  <ul className="mt-2 flex flex-wrap gap-3 text-slate-400">
+                    {misses.map((u) => {
+                      const i = u.i
+                      const guess = u.closest && answers[i] !== 'no' ? lookup(u.closest) : undefined
+                      return (
+                        <li key={i} className={`flex flex-col gap-1 ${zoomed === i ? 'w-64' : 'w-28'}`}>
+                          {u.image ? (
+                            <button type="button" onClick={() => setZoomed(zoomed === i ? null : i)} title="Click to enlarge">
+                              <img
+                                src={u.image}
+                                alt={`What the scan cut out for: ${u.label}`}
+                                className="aspect-[63/88] w-full rounded border border-slate-700 bg-slate-950 object-contain"
+                              />
+                            </button>
+                          ) : (
+                            <div className="flex aspect-[63/88] w-full items-center justify-center rounded border border-dashed border-slate-700 p-1 text-center text-xs text-slate-500">
+                              No card outline found
+                            </div>
+                          )}
+                          <span className="text-xs leading-tight">{u.label}</span>
+                          {u.detail && <span className="text-xs leading-tight text-slate-500">{u.detail}</span>}
+                          {guess && (
+                            <div className="mt-1 flex flex-col gap-1 rounded border border-slate-700 bg-slate-900 p-1.5">
+                              <span className="text-xs font-medium text-slate-200">Is this the card?</span>
+                              <CardImage card={guess} showText={false} className="!rounded" />
+                              <span className="text-xs leading-tight text-slate-300">
+                                {guess.name} <span className="text-slate-500">{guess.id}</span>
+                              </span>
+                              <div className="flex gap-2">
+                                <button
+                                  type="button"
+                                  aria-label={`Yes, it's ${guess.name}: add it to the deck`}
+                                  title="Yes, add it to the deck"
+                                  onClick={() => accept(i, guess)}
+                                  className="flex h-8 flex-1 items-center justify-center rounded bg-green-700 text-lg font-bold text-white hover:bg-green-600"
+                                >
+                                  ✓
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label={`No, it's not ${guess.name}`}
+                                  title="No, it's a different card"
+                                  onClick={() => setAnswers((a) => ({ ...a, [i]: 'no' }))}
+                                  className="flex h-8 flex-1 items-center justify-center rounded bg-red-700 text-lg font-bold text-white hover:bg-red-600"
+                                >
+                                  ✗
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              )}
             </div>
-          )}
+          </div>
           <div className="flex justify-end gap-2">
             <Button onClick={() => setResult(null)}>Scan another photo</Button>
             <Button variant="primary" onClick={create} disabled={!leaderRow && total === 0}>
