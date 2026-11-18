@@ -90,12 +90,18 @@ class Match:
     score: float
     confidence: str | None  # None: not sure enough to use
     runners_up: list[tuple[str, float]]
+    # The printing whose art matched best: the card id itself for the base art,
+    # or an alternate art's id such as "OP01-016_p1".
+    printing: str | None = None
 
 
 class ImageIndex:
-    def __init__(self, ids: list[str], vectors: np.ndarray) -> None:
+    def __init__(self, ids: list[str], vectors: np.ndarray, printings: list[str] | None = None) -> None:
         self.ids = ids  # base card id for each row (alternate arts map to their card)
         self.vectors = vectors.astype(np.float32)
+        # The printing each row's image is of. Index files saved before this was
+        # kept don't have it, so every row counts as its card's base art.
+        self.printings = printings if printings is not None and len(printings) == len(ids) else list(ids)
 
     def __len__(self) -> int:
         return len(self.ids)
@@ -115,8 +121,12 @@ class ImageIndex:
         scores = np.max(self.vectors[rows] @ np.stack(views).T, axis=1)
         # Best score per card id (a card's alternate arts all count as that card).
         per_card: dict[str, float] = {}
+        best_printing: dict[str, str] = {}
         for i in np.argsort(-scores)[:50]:
-            per_card.setdefault(self.ids[rows[i]], float(scores[i]))
+            card_id = self.ids[rows[i]]
+            if card_id not in per_card:
+                per_card[card_id] = float(scores[i])
+                best_printing[card_id] = self.printings[rows[i]]
         ranked = sorted(per_card.items(), key=lambda kv: -kv[1])
         card_id, score = ranked[0]
         lead = score - (ranked[1][1] if len(ranked) > 1 else 0.0)
@@ -128,11 +138,13 @@ class ImageIndex:
             confidence = "Low"
         else:
             confidence = None
-        return Match(card_id, score, confidence, [(c, round(s, 3)) for c, s in ranked[1:4]])
+        return Match(card_id, score, confidence, [(c, round(s, 3)) for c, s in ranked[1:4]], best_printing[card_id])
 
     def save(self, path: Path = INDEX_FILE) -> None:
         tmp = path.with_name(path.stem + ".tmp.npz")
-        np.savez_compressed(tmp, ids=np.array(self.ids), vectors=self.vectors, version=VERSION)
+        np.savez_compressed(
+            tmp, ids=np.array(self.ids), printings=np.array(self.printings), vectors=self.vectors, version=VERSION
+        )
         tmp.replace(path)
 
 
@@ -153,7 +165,8 @@ def load_index(path: Path = INDEX_FILE) -> ImageIndex | None:
             try:
                 with np.load(path) as data:
                     if int(data["version"]) == VERSION:
-                        index = ImageIndex([str(i) for i in data["ids"]], data["vectors"])
+                        printings = [str(i) for i in data["printings"]] if "printings" in data.files else None
+                        index = ImageIndex([str(i) for i in data["ids"]], data["vectors"], printings)
                     else:
                         log.warning("%s is out of date; run scripts/build_image_index.py again.", path.name)
             except Exception as exc:  # a damaged file shouldn't break scanning

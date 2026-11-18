@@ -62,7 +62,8 @@ def get_card(card_id: str, store: CardStore = Depends(get_store)) -> dict:
 
 @app.get("/api/cards/{card_id}/image")
 async def card_image(card_id: str, store: CardStore = Depends(get_store)):
-    card = store.get(card_id)
+    """A card's image. `card_id` can also be an alternate art's id, e.g. OP01-016_p1."""
+    card = store.get(card_id) or store.alt_art(card_id)
     if card is None:
         raise HTTPException(status_code=404, detail="Card not found")
     path = await fetch_image(card)

@@ -126,6 +126,8 @@ cd backend && python scripts/import_cards.py
 Then restart the backend so it picks up the new cards.
 Run `python scripts/build_image_index.py` afterwards too, so photo scanning can recognise the new
 cards by their art (it only downloads images it doesn't have yet).
+If your image index was built before scans showed the alternate art they matched, run it once
+more (it reuses the cached images): until then the scan review shows the base art.
 
 **Upgrading an existing setup:** scanning now uses `opencv-python` in place of
 `opencv-python-headless`. Run `pip uninstall -y opencv-python-headless` and then
