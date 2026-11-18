@@ -85,9 +85,10 @@ export interface ScanResult {
   cards: { id: string; count: number; confidence: 'High' | 'Medium' | 'Low'; via?: string[] }[]
   /**
    * Cards found but not identified. `image` is the crop the square detection cut out, as a data: URL;
-   * `detail` says what the number reader and image match saw.
+   * `detail` says what the number reader and image match saw; `closest` is the id of the
+   * nearest card the image match found, offered to the user to confirm.
    */
-  unmatched: { label: string; confidence: string; image?: string; detail?: string }[]
+  unmatched: { label: string; confidence: string; image?: string; detail?: string; closest?: string }[]
   /** A problem that didn't stop the scan, e.g. CardSight couldn't be reached. */
   note?: string
   /** How many cards OpenCV found in the photo (0 means the whole photo was sent instead). */
