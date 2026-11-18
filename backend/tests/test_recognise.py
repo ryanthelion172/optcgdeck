@@ -71,6 +71,29 @@ def test_alternate_arts_count_as_their_card():
     assert index.best(photo_of(cards[1])).card_id == "C0"
 
 
+def test_the_matched_alternate_art_is_reported():
+    cards = [fake_card(i) for i in range(3)]
+    index = ImageIndex(["C0", "C0", "C1"], np.stack([fingerprint(c) for c in cards]), ["C0", "C0_p1", "C1"])
+    m = index.best(photo_of(cards[1]))
+    assert (m.card_id, m.printing) == ("C0", "C0_p1")
+    assert index.best(photo_of(cards[2])).printing == "C1"
+    # Index files saved before printings were kept count every row as the base art.
+    assert ImageIndex(["C0", "C0"], np.stack([fingerprint(c) for c in cards[:2]])).best(photo_of(cards[1])).printing == "C0"
+
+
+def test_alternate_art_is_kept_on_found_and_unplaced_cards():
+    found = [scan.detection("C0", "High", "image match", "C0_p1"), scan.detection("C0", "High", "set code")]
+    assert scan.count_cards(found) == [
+        {"id": "C0", "count": 2, "confidence": "High", "via": ["image match", "set code"], "printing": "C0_p1"}
+    ]
+    assert "printing" not in scan.detection("C0", "High", "image match", "C0")
+    seen = {"imageMatch": {"card": "OP01-016", "printing": "OP01-016_p1", "score": 0.41}}
+    entry = scan.unmatched_entry("Card 1", seen, None)
+    assert (entry["closest"], entry["closestPrinting"]) == ("OP01-016", "OP01-016_p1")
+    base = scan.unmatched_entry("Card 1", {"imageMatch": {"card": "OP01-016", "printing": "OP01-016", "score": 0.4}}, None)
+    assert "closestPrinting" not in base
+
+
 def test_unplaced_cards_say_what_was_read(monkeypatch):
     monkeypatch.setattr(
         scan, "recognise_card",

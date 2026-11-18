@@ -21,17 +21,26 @@ from .models import Card, CardName, CardPrinting, Set
 
 
 class CardStore:
-    def __init__(self, cards: list[dict]) -> None:
+    def __init__(self, cards: list[dict], printings: list[dict] | None = None) -> None:
         # Base arts only: alternate arts stay on the backend (see load_printings).
         cards = [{k: v for k, v in c.items() if k != "variants"} for c in cards]
         self.cards = sorted(cards, key=lambda c: c["id"])
         self.by_id: dict[str, dict] = {c["id"]: c for c in self.cards}
+        # Alternate arts by id, as {"id", "image"}, so their images can be served
+        # (photo scanning shows the alternate art it matched).
+        self.alt_arts: dict[str, dict] = {
+            p["id"].upper(): {"id": p["id"], "image": p["image"]} for p in printings or [] if not p["is_base"]
+        }
         self.json = json.dumps(self.cards, ensure_ascii=False, separators=(",", ":")).encode()
         # Changes whenever the card data changes, so browsers can cache it.
         self.etag = '"' + hashlib.sha256(self.json).hexdigest()[:16] + '"'
 
     def get(self, card_id: str) -> dict | None:
         return self.by_id.get(card_id.upper())
+
+    def alt_art(self, printing_id: str) -> dict | None:
+        """An alternate art, e.g. "OP01-016_p1", as {"id", "image"}."""
+        return self.alt_arts.get(printing_id.upper())
 
 
 def load_cards(db: Session) -> list[dict]:
@@ -50,7 +59,7 @@ def load_printings(db: Session) -> list[dict]:
 @lru_cache(maxsize=1)
 def _load_store() -> CardStore:
     with session_factory()() as db:
-        return CardStore(load_cards(db))
+        return CardStore(load_cards(db), load_printings(db))
 
 
 def get_store() -> CardStore:

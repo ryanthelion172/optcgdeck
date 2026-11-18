@@ -16,7 +16,8 @@ interface Props {
   onClose: () => void
 }
 
-type Row = { card: Card; count: number; confidence: string; via: string[] }
+/** `printing`: the alternate art the scan matched (e.g. OP01-016_p1), shown instead of the base art. */
+type Row = { card: Card; count: number; confidence: string; via: string[]; printing?: string }
 
 export function ScanModal({ cards, lookup, deckNames, onCreate, onClose }: Props) {
   const [mode, setMode] = useState<ScanMode>('deck')
@@ -63,7 +64,7 @@ export function ScanModal({ cards, lookup, deckNames, onCreate, onClose }: Props
       if (id !== scanId.current) return
       const found = res.cards.flatMap((c) => {
         const card = lookup(c.id)
-        return card ? [{ card, count: c.count, confidence: c.confidence, via: c.via ?? [] }] : []
+        return card ? [{ card, count: c.count, confidence: c.confidence, via: c.via ?? [], printing: c.printing }] : []
       })
       setResult(res)
       setZoomed(null)
@@ -86,16 +87,17 @@ export function ScanModal({ cards, lookup, deckNames, onCreate, onClose }: Props
     setRows((rs) => rs.map((r) => (r.card.id === id ? { ...r, count: Math.max(0, Math.min(maxCopies(id), count)) } : r)))
 
   /** The user confirmed the closest card, or searched for the right one: add one copy of it to the deck. */
-  const accept = (i: number, card: Card, via = 'confirmed by you') => {
+  const accept = (i: number, card: Card, via = 'confirmed by you', printing?: string) => {
     setAnswers((a) => ({ ...a, [i]: 'yes' }))
     setZoomed((z) => (z === i ? null : z))
     setRows((rs) => {
       const existing = rs.find((r) => r.card.id === card.id)
-      if (!existing) return [...rs, { card, count: 1, confidence: 'High', via: [via] }]
+      if (!existing) return [...rs, { card, count: 1, confidence: 'High', via: [via], printing }]
       return rs.map((r) =>
         r === existing
           ? {
               ...r,
+              printing: r.printing ?? printing,
               count: card.category === 'Leader' ? r.count : Math.min(maxCopies(card.id), r.count + 1),
               via: r.via.includes(via) ? r.via : [...r.via, via],
             }
@@ -223,7 +225,7 @@ export function ScanModal({ cards, lookup, deckNames, onCreate, onClose }: Props
               <ul className="shrink-0 divide-y divide-slate-800 rounded-lg bg-slate-950">
                 {mainRows.map((r) => (
                   <li key={r.card.id} className="flex items-center gap-2 px-2 py-1.5">
-                    <CardImage card={r.card} className="!w-10 shrink-0" showText={false} />
+                    <CardImage card={r.card} printing={r.printing} className="!w-10 shrink-0" showText={false} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm">{r.card.name}</span>
                       <span className="text-xs text-slate-500">
@@ -261,7 +263,7 @@ export function ScanModal({ cards, lookup, deckNames, onCreate, onClose }: Props
                       const guess = u.closest && answers[i] !== 'no' ? lookup(u.closest) : undefined
                       const searching = !guess
                       return (
-                        <li key={i} className="flex flex-wrap gap-2">
+                        <li key={i} className={`flex gap-3 ${searching ? 'w-full flex-col sm:flex-row' : ''}`}>
                           <div className={`flex flex-col gap-1 ${zoomed === i ? 'w-64' : 'w-28'}`}>
                             {u.image ? (
                               <button type="button" onClick={() => setZoomed(zoomed === i ? null : i)} title="Click to enlarge">
@@ -281,7 +283,7 @@ export function ScanModal({ cards, lookup, deckNames, onCreate, onClose }: Props
                             {guess && (
                               <div className="mt-1 flex flex-col gap-1 rounded border border-slate-700 bg-slate-900 p-1.5">
                                 <span className="text-xs font-medium text-slate-200">Is this the card?</span>
-                                <CardImage card={guess} showText={false} className="!rounded" />
+                                <CardImage card={guess} printing={u.closestPrinting} showText={false} className="!rounded" />
                                 <span className="text-xs leading-tight text-slate-300">
                                   {guess.name} <span className="text-slate-500">{guess.id}</span>
                                 </span>
@@ -290,7 +292,7 @@ export function ScanModal({ cards, lookup, deckNames, onCreate, onClose }: Props
                                     type="button"
                                     aria-label={`Yes, it's ${guess.name}: add it to the deck`}
                                     title="Yes, add it to the deck"
-                                    onClick={() => accept(i, guess)}
+                                    onClick={() => accept(i, guess, undefined, u.closestPrinting)}
                                     className="flex h-8 flex-1 items-center justify-center rounded bg-green-700 text-lg font-bold text-white hover:bg-green-600"
                                   >
                                     ✓
@@ -309,11 +311,16 @@ export function ScanModal({ cards, lookup, deckNames, onCreate, onClose }: Props
                             )}
                           </div>
                           {searching && (
-                            <div className="flex w-60 flex-col gap-1 self-start rounded border border-slate-700 bg-slate-900 p-1.5">
-                              <span className="text-xs font-medium text-slate-200">
+                            <div className="flex min-w-0 flex-1 flex-col gap-2 self-start rounded border border-slate-700 bg-slate-900 p-2">
+                              <span className="text-sm font-medium text-slate-200">
                                 {answers[i] === 'no' ? 'Which card is it? Search to add it:' : 'Search for the card to add it:'}
                               </span>
-                              <CardSearch cards={cards} label={`Search for ${u.label}`} onPick={(card) => accept(i, card, 'picked by you')} />
+                              <CardSearch
+                                cards={cards}
+                                large
+                                label={`Search for ${u.label}`}
+                                onPick={(card) => accept(i, card, 'picked by you')}
+                              />
                             </div>
                           )}
                         </li>

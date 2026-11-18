@@ -10,13 +10,19 @@ export function CardImage({
   card,
   className = '',
   showText = true,
+  printing,
 }: {
   card: Card
   className?: string
+  /** Show this printing's art (an alternate art's id, e.g. OP01-016_p1) instead of the base art. */
+  printing?: string
   /** Turn off for small thumbnails, where the name won't fit. */
   showText?: boolean
 }) {
   const [failed, setFailed] = useState(false)
+  const [altFailed, setAltFailed] = useState(false)
+  // If the alternate art can't be loaded, fall back to the base art.
+  const art = printing && !altFailed ? printing : card.id
   return (
     <div className={`relative aspect-[5/7] w-full overflow-hidden rounded-lg bg-slate-800 ${className}`}>
       {showText && (
@@ -27,10 +33,10 @@ export function CardImage({
       )}
       {!failed && (
         <img
-          src={cardImageUrl(card.id)}
-          alt={`${card.name} (${card.id})`}
+          src={cardImageUrl(art)}
+          alt={`${card.name} (${art})`}
           loading="lazy"
-          onError={() => setFailed(true)}
+          onError={() => (art !== card.id ? setAltFailed(true) : setFailed(true))}
           className="absolute inset-0 h-full w-full object-cover"
         />
       )}

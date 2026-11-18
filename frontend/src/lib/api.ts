@@ -81,14 +81,18 @@ export async function deleteDeck(id: string): Promise<void> {
 
 export interface ScanResult {
   detected: number
-  /** `via`: how the card was identified: 'set code', 'image match', 'name + image match' or 'name'; the scan results add 'confirmed by you' and 'picked by you'. */
-  cards: { id: string; count: number; confidence: 'High' | 'Medium' | 'Low'; via?: string[] }[]
+  /**
+   * `via`: how the card was identified: 'set code', 'image match', 'name + image match' or 'name'; the scan results add 'confirmed by you' and 'picked by you'.
+   * `printing`: the alternate art the image match saw (e.g. 'OP01-016_p1'), left out for the base art.
+   */
+  cards: { id: string; count: number; confidence: 'High' | 'Medium' | 'Low'; via?: string[]; printing?: string }[]
   /**
    * Cards found but not identified. `image` is the crop the square detection cut out, as a data: URL;
    * `detail` says what the number reader and image match saw; `closest` is the id of the
-   * nearest card the image match found, offered to the user to confirm.
+   * nearest card the image match found, offered to the user to confirm, and `closestPrinting`
+   * the alternate art of it that matched (left out for the base art).
    */
-  unmatched: { label: string; image?: string; detail?: string; closest?: string }[]
+  unmatched: { label: string; image?: string; detail?: string; closest?: string; closestPrinting?: string }[]
   /** How many card outlines OpenCV found in the photo (0 means the whole photo was read as one card). */
   cardsFound?: number
   /** What each step saw for each card, for debugging. */

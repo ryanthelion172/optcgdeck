@@ -33,14 +33,20 @@ PARALLEL_CALLS = 8
 CONFIDENCE_ORDER = ["Low", "Medium", "High"]
 
 
-def detection(card_id: str, confidence: str, via: str) -> dict:
-    return {"id": card_id, "confidence": confidence, "via": via}
+def detection(card_id: str, confidence: str, via: str, printing: str | None = None) -> dict:
+    """One identified card. `printing` is the art the image match saw (an alternate
+    art's id such as "OP01-016_p1"), when it differs from the base art."""
+    det = {"id": card_id, "confidence": confidence, "via": via}
+    if printing and printing != card_id:
+        det["printing"] = printing
+    return det
 
 
 def count_cards(found: list[dict]) -> list[dict]:
     """Groups detections into one entry per card, with how many copies were found.
 
-    Each card keeps the lowest confidence seen for it and every step that found it.
+    Each card keeps the lowest confidence seen for it, every step that found it,
+    and the first alternate art the image match saw for it, if any.
     """
     counts: dict[str, dict] = {}
     for det in found:
@@ -48,6 +54,8 @@ def count_cards(found: list[dict]) -> list[dict]:
         entry["count"] += 1
         if det["via"] not in entry["via"]:
             entry["via"].append(det["via"])
+        if det.get("printing") and "printing" not in entry:
+            entry["printing"] = det["printing"]
         if CONFIDENCE_ORDER.index(det["confidence"]) < CONFIDENCE_ORDER.index(entry["confidence"]):
             entry["confidence"] = det["confidence"]
     return list(counts.values())
@@ -91,14 +99,15 @@ def recognise_card(img: np.ndarray, store, index: ImageIndex | None) -> tuple[di
         seen["imageMatch"] = "image match off: run scripts/build_image_index.py"
     elif m := index.best(img):
         seen["imageMatch"] = {
-            "card": m.card_id, "score": round(m.score, 3), "confidence": m.confidence, "runnersUp": m.runners_up
+            "card": m.card_id, "printing": m.printing, "score": round(m.score, 3), "confidence": m.confidence,
+            "runnersUp": m.runners_up,
         }
         if m.confidence in ("High", "Medium"):
-            return detection(m.card_id, m.confidence, "image match"), seen
+            return detection(m.card_id, m.confidence, "image match", m.printing), seen
     if index is not None and (found := by_name(img, store, index, m, seen)):
         return found, seen
     if m is not None and m.confidence:  # a weak art match, and the name didn't help
-        return detection(m.card_id, m.confidence, "image match"), seen
+        return detection(m.card_id, m.confidence, "image match", m.printing), seen
     if "not installed" not in seen.get("setCodeRead", "") and (found := read(upside_down=True)):
         return found, seen
     return None, seen
@@ -126,15 +135,15 @@ def by_name(img: np.ndarray, store, index: ImageIndex, art: Match | None, seen: 
         return None
     if art is not None and art.card_id in ids:
         # The weak art match agrees with the name: trust it a bit more.
-        return detection(art.card_id, "Medium", "name + image match")
+        return detection(art.card_id, "Medium", "name + image match", art.printing)
     m = index.best(img, only=set(ids))
     if m is None:  # none of the cards with that name are in the image index
         return detection(ids[0], "Low", "name") if len(ids) == 1 else None
-    seen["nameMatch"] = {"card": m.card_id, "score": round(m.score, 3), "runnersUp": m.runners_up}
+    seen["nameMatch"] = {"card": m.card_id, "printing": m.printing, "score": round(m.score, 3), "runnersUp": m.runners_up}
     # One card with that name: the name settles it. Several (reprints, other
     # versions): the art picks one, so it's worth a look.
     confidence = "Medium" if len(set(ids)) == 1 or (m.confidence in ("High", "Medium")) else "Low"
-    return detection(m.card_id, confidence, "name + image match")
+    return detection(m.card_id, confidence, "name + image match", m.printing)
 
 
 Recognise = Callable[[np.ndarray, object, ImageIndex | None], tuple[dict | None, dict]]
@@ -155,8 +164,8 @@ def describe(seen: dict) -> str:
     return "; ".join(parts)
 
 
-def closest(seen: dict) -> str | None:
-    """The card id the local match thinks is nearest, offered to the user to confirm.
+def closest_match(seen: dict) -> dict | None:
+    """The match the local search thinks is nearest, offered to the user to confirm.
 
     The match among cards with the name read wins over the plain art match: it
     agrees with the text on the card as well as the picture.
@@ -164,8 +173,14 @@ def closest(seen: dict) -> str | None:
     for key in ("nameMatch", "imageMatch"):
         m = seen.get(key)
         if isinstance(m, dict) and m.get("card"):
-            return m["card"]
+            return m
     return None
+
+
+def closest(seen: dict) -> str | None:
+    """The card id of the nearest match (see closest_match)."""
+    m = closest_match(seen)
+    return m["card"] if m else None
 
 
 def unmatched_entry(label: str, seen: dict, jpeg: bytes | None) -> dict:
@@ -173,8 +188,11 @@ def unmatched_entry(label: str, seen: dict, jpeg: bytes | None) -> dict:
     entry = {"label": label, "detail": describe(seen)}
     if jpeg:
         entry["image"] = data_url(jpeg)
-    if guess := closest(seen):
-        entry["closest"] = guess
+    if guess := closest_match(seen):
+        entry["closest"] = guess["card"]
+        # The art it matched, so the app shows that alternate art and not the base one.
+        if guess.get("printing") and guess["printing"] != guess["card"]:
+            entry["closestPrinting"] = guess["printing"]
     return entry
 
 

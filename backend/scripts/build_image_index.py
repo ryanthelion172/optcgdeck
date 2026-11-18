@@ -78,19 +78,20 @@ def main() -> int:
     print(f"Getting {len(jobs)} card images (cached ones are reused)...")
     results = asyncio.run(fetch_all(jobs))
 
-    ids, vectors, failed = [], [], []
+    ids, printing_ids, vectors, failed = [], [], [], []
     for (card_id, image), (_, path) in zip(jobs, results):
         img = cv2.imread(str(path), cv2.IMREAD_COLOR) if path else None
         if img is None:
             failed.append(image["id"])
             continue
         ids.append(card_id)
+        printing_ids.append(image["id"])
         vectors.append(fingerprint(img))
 
     if not ids:
         print("No images could be loaded, so no index was saved.", file=sys.stderr)
         return 1
-    ImageIndex(ids, np.stack(vectors)).save()
+    ImageIndex(ids, np.stack(vectors), printing_ids).save()
     print(f"Saved fingerprints for {len(ids)} images to {INDEX_FILE.name}.")
     if failed:
         shown = ", ".join(failed[:20]) + (" ..." if len(failed) > 20 else "")

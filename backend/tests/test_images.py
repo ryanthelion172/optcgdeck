@@ -65,10 +65,26 @@ def test_unknown_card_404(fake_web):
     assert TestClient(app).get("/api/cards/XX99-999/image").status_code == 404
 
 
-def test_alternate_arts_are_not_downloaded(fake_web):
+def test_unknown_alternate_arts_are_not_downloaded(fake_web):
     calls = fake_web(lambda r: httpx.Response(200, content=PNG, headers={"content-type": "image/png"}))
     assert TestClient(app).get("/api/cards/OP01-001_p1/image").status_code == 404
     assert calls == []
+
+
+def test_serves_a_known_alternate_art(fake_web):
+    """Photo scanning shows the alternate art it matched, so its image is served too."""
+    from app.cards import CardStore, get_store
+
+    from .conftest import SAMPLE_CARDS
+
+    url = "https://en.onepiece-cardgame.com/images/cardlist/card/OP01-001_p1.png"
+    app.dependency_overrides[get_store] = lambda: CardStore(
+        SAMPLE_CARDS, [{"id": "OP01-001_p1", "card_id": "OP01-001", "is_base": False, "image": url}]
+    )
+    calls = fake_web(lambda r: httpx.Response(200, content=PNG, headers={"content-type": "image/png"}))
+    resp = TestClient(app).get("/api/cards/OP01-001_p1/image")
+    assert resp.status_code == 200 and resp.content == PNG
+    assert [str(r.url) for r in calls] == [url]
 
 
 def test_simultaneous_requests_download_once(fake_web):
