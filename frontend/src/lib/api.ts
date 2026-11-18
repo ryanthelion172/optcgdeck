@@ -81,35 +81,31 @@ export async function deleteDeck(id: string): Promise<void> {
 
 export interface ScanResult {
   detected: number
-  /** `via`: how the card was identified: 'set code', 'image match', 'name + image match' or 'CardSight'. */
+  /** `via`: how the card was identified: 'set code', 'image match', 'name + image match' or 'name'; the scan results add 'confirmed by you' and 'picked by you'. */
   cards: { id: string; count: number; confidence: 'High' | 'Medium' | 'Low'; via?: string[] }[]
   /**
    * Cards found but not identified. `image` is the crop the square detection cut out, as a data: URL;
    * `detail` says what the number reader and image match saw; `closest` is the id of the
    * nearest card the image match found, offered to the user to confirm.
    */
-  unmatched: { label: string; confidence: string; image?: string; detail?: string; closest?: string }[]
-  /** A problem that didn't stop the scan, e.g. CardSight couldn't be reached. */
-  note?: string
-  /** How many cards OpenCV found in the photo (0 means the whole photo was sent instead). */
+  unmatched: { label: string; image?: string; detail?: string; closest?: string }[]
+  /** How many card outlines OpenCV found in the photo (0 means the whole photo was read as one card). */
   cardsFound?: number
-  /** CardSight's raw answers, per card found, for debugging. */
+  /** What each step saw for each card, for debugging. */
   raw?: unknown
 }
 
 /** 'deck': a photo of many cards laid out. 'single': a photo of one card, which can fill the frame. */
 export type ScanMode = 'deck' | 'single'
 
-/** Sends a photo to the backend, which finds each card and identifies it with CardSight. */
+/** Sends a photo to the backend, which finds each card and identifies it. */
 export async function scanPhoto(photo: File, mode: ScanMode = 'deck'): Promise<ScanResult> {
   const body = new FormData()
   body.append('photo', photo)
   body.append('mode', mode)
   const resp = await check(await fetch(`${API_BASE}/api/scan`, { method: 'POST', body }), 'Scan failed')
   const result: ScanResult = await resp.json()
-  // Debugging aid: open the browser console (F12) to see what CardSight returned.
-  console.log(`Cards found in the photo: ${result.cardsFound}`)
-  console.log('CardSight raw answers:', result.raw)
-  console.log('Matched result:', { detected: result.detected, cards: result.cards, unmatched: result.unmatched })
+  // Debugging aid: open the browser console (F12) to see what each step read for each card.
+  console.log('Scan result:', result)
   return result
 }

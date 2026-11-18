@@ -11,9 +11,9 @@ from .cards import CardStore, get_store
 from .decks import router as decks_router
 from .images import MEDIA_TYPES, close_client, fetch_image
 from .detect import BadImage
-from .scan import ScanError, identify, scan
+from .scan import scan
 
-# Secrets such as CARDSIGHTAI_API_KEY live in backend/.env, which git ignores.
+# Settings such as DATABASE_URL live in backend/.env, which git ignores.
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
@@ -84,7 +84,7 @@ def scan_photo(
     mode: Literal["deck", "single"] = Form("deck"),
     store: CardStore = Depends(get_store),
 ) -> dict:
-    """Identifies the cards in a photo: one CardSight API call per card found.
+    """Identifies the cards in a photo, on this server (see scan.py).
 
     `mode` "single" says the photo is of one card, which may fill most of the frame.
     """
@@ -94,9 +94,7 @@ def scan_photo(
     if len(image) > MAX_PHOTO_BYTES:
         raise HTTPException(status_code=413, detail="That photo is too large (15 MB max).")
     try:
-        return scan(image, photo.filename or "photo.jpg", photo.content_type, store, identify, single=mode == "single")
+        return scan(image, store, single=mode == "single")
     except BadImage as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ScanError as exc:
-        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
 

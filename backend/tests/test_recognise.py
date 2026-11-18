@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from app import main, scan
+from app import scan
 from app.cards import CardStore
 from app.main import app
 from app.match import ImageIndex, fingerprint
@@ -71,48 +71,7 @@ def test_alternate_arts_count_as_their_card():
     assert index.best(photo_of(cards[1])).card_id == "C0"
 
 
-def test_cards_found_locally_skip_cardsight(monkeypatch):
-    calls = []
-
-    def fake_identify(image, filename, mime):
-        calls.append(filename)
-        return [{"confidence": "High", "card": {"number": "OP01-001"}}]
-
-    def fake_recognise(img, store, index):
-        return scan.local_detection("OP01-016", "High", "set code"), {"setCodeRead": "OP01-016"}
-
-    monkeypatch.setattr(main, "identify", fake_identify)
-    monkeypatch.setattr(scan, "recognise_card", fake_recognise)
-    body = TestClient(app).post("/api/scan", files={"photo": ("d.jpg", deck_photo(3), "image/jpeg")}).json()
-    assert calls == []  # every card was read locally, so no API calls
-    assert body["cards"] == [{"id": "OP01-016", "count": 3, "confidence": "High", "via": ["set code"]}]
-
-
-def test_only_leftover_cards_go_to_cardsight(monkeypatch):
-    calls = []
-
-    def fake_identify(image, filename, mime):
-        calls.append(filename)
-        return [] if filename == "d.jpg" else [{"confidence": "Medium", "card": {"number": "OP01-001"}}]
-
-    seen = iter(range(100))
-
-    def fake_recognise(img, store, index):
-        if next(seen) == 0:
-            return scan.local_detection("OP01-016", "High", "image match"), {}
-        return None, {"setCodeRead": "0P0l"}
-
-    monkeypatch.setattr(main, "identify", fake_identify)
-    monkeypatch.setattr(scan, "PARALLEL_CALLS", 1)  # keep the order
-    monkeypatch.setattr(scan, "recognise_card", fake_recognise)
-    body = TestClient(app).post("/api/scan", files={"photo": ("d.jpg", deck_photo(3), "image/jpeg")}).json()
-    assert sorted(calls) == ["card-2.jpg", "card-3.jpg", "d.jpg"]
-    assert {"id": "OP01-016", "count": 1, "confidence": "High", "via": ["image match"]} in body["cards"]
-    assert {"id": "OP01-001", "count": 2, "confidence": "Medium", "via": ["CardSight"]} in body["cards"]
-
-
 def test_unplaced_cards_say_what_was_read(monkeypatch):
-    monkeypatch.setattr(main, "identify", lambda *a: [])
     monkeypatch.setattr(
         scan, "recognise_card",
         lambda img, store, index: (None, {"setCodeRead": "OP0", "imageMatch": {"card": "OP01-016", "score": 0.41}}),
@@ -227,7 +186,7 @@ def test_a_weak_art_match_falls_back_to_the_name(monkeypatch):
     index = FakeIndex(Match("OP01-016", 0.5, None, []), Match("ST01-012", 0.55, "Low", []))
     found, seen = scan.recognise_card(fake_card(3), store, index)
     assert index.asked == [None, set(luffys)]  # the art is compared with only the Luffys
-    assert found == scan.local_detection("ST01-012", "Low", "name + image match")  # several Luffys: worth a look
+    assert found == scan.detection("ST01-012", "Low", "name + image match")  # several Luffys: worth a look
     assert seen["nameRead"] == "name" and seen["nameMatch"]["card"] == "ST01-012"
 
 
@@ -237,7 +196,7 @@ def test_a_name_with_one_card_settles_it(monkeypatch):
     no_number(monkeypatch, ["OP01-013"])
     index = FakeIndex(Match("OP01-016", 0.5, None, []), Match("OP01-013", 0.4, "Low", []))
     found, _ = scan.recognise_card(fake_card(3), store, index)
-    assert found == scan.local_detection("OP01-013", "Medium", "name + image match")
+    assert found == scan.detection("OP01-013", "Medium", "name + image match")
 
 
 def test_a_low_art_match_that_the_name_agrees_with_is_kept(monkeypatch):
@@ -246,7 +205,7 @@ def test_a_low_art_match_that_the_name_agrees_with_is_kept(monkeypatch):
     no_number(monkeypatch, ["OP01-016"])
     index = FakeIndex(Match("OP01-016", 0.61, "Low", []))
     found, _ = scan.recognise_card(fake_card(3), store, index)
-    assert found == scan.local_detection("OP01-016", "Medium", "name + image match")
+    assert found == scan.detection("OP01-016", "Medium", "name + image match")
     assert index.asked == [None]
 
 
@@ -265,7 +224,7 @@ def test_no_name_read_keeps_a_low_art_match(monkeypatch):
     no_number(monkeypatch, [])
     index = FakeIndex(Match("OP01-016", 0.61, "Low", []))
     found, seen = scan.recognise_card(fake_card(3), store, index)
-    assert found == scan.local_detection("OP01-016", "Low", "image match")
+    assert found == scan.detection("OP01-016", "Low", "image match")
     assert scan.describe(seen) == 'No number read; closest art OP01-016 (0.61); name read "name / name"'
 
 
