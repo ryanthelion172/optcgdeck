@@ -15,11 +15,11 @@ OpenCV and crops it. Each crop is then identified, trying in order:
    the image index, see below). When that match is weak or missing, the card's **name** printed at
    the bottom is read (RapidOCR again), and the art is compared with only the cards that have that
    name. This works for English cards only.
-3. **CardSight:** the [CardSight AI](https://cardsight.ai) API, only for cards the first two
-   couldn't place.
 
-The scan results say which step found each card, and show the cut-out picture of any card that
-wasn't identified, with what the number reader and image match saw. Photos work best with the cards
+Everything runs on the backend; no outside scanning service is used. The scan results say which
+step found each card. For a card that wasn't identified they show its cut-out picture, what the
+number reader and image match saw, and the closest card with "Is this the card?". Saying no opens
+a search by name or card number to pick the right one. Photos work best with the cards
 flat, not overlapping, on a plain background that contrasts with them.
 
 ## Project layout
@@ -44,7 +44,7 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
-cp .env.example .env               # add your CardSight key; DATABASE_URL already points at the local database
+cp .env.example .env               # DATABASE_URL already points at the local database
 python -m alembic upgrade head     # create the tables
 python scripts/import_cards.py     # load the cards (about 30 seconds)
 python scripts/build_image_index.py  # card images for scanning (first run downloads a few thousand images)
@@ -108,8 +108,7 @@ and run steps 2 and 3 against it. No code changes are needed.
 When the tables change later, a new migration goes in `backend/migrations/versions/` and the
 same `python -m alembic upgrade head` command applies it.
 
-`backend/.env` holds your `CARDSIGHTAI_API_KEY` and `DATABASE_URL`. Git ignores it, so it never goes to GitHub.
-Everything except photo scanning works without the CardSight key.
+`backend/.env` holds your `DATABASE_URL`. Git ignores it, so it never goes to GitHub.
 
 ## Tests
 

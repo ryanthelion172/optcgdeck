@@ -251,7 +251,6 @@ export function ScanModal({ cards, lookup, deckNames, onCreate, onClose }: Props
                 ))}
                 {mainRows.length === 0 && <li className="p-3 text-sm text-slate-400">No main-deck cards recognised.</li>}
               </ul>
-              {result.note && <p className="shrink-0 text-sm text-amber-300">{result.note}</p>}
               {misses.length > 0 && (
                 <div className="shrink-0 text-sm text-amber-300">
                   Couldn't match {misses.length} card{misses.length === 1 ? '' : 's'}. Confirm the closest card, or search for{' '}
