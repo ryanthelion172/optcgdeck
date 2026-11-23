@@ -57,7 +57,9 @@ def find_outlines(img: np.ndarray, single: bool = False) -> list[np.ndarray]:
     Edge detection is run with a few settings and the one that finds the most
     cards of a similar size wins, since no single setting suits every photo. On
     a tie the larger boxes win, since a faint outer edge loses to the card's
-    inner frame with some settings.
+    inner frame with some settings. The card size those outlines give is then
+    checked against the photo's card-sized rectangles (see check_card_size), and
+    the rectangle search finds the cards whose outlines didn't close.
 
     With `single`, the photo holds one card: the biggest card-shaped outline is
     returned on its own, and it may fill nearly the whole photo.
@@ -74,8 +76,10 @@ def find_outlines(img: np.ndarray, single: bool = False) -> list[np.ndarray]:
     max_area = SINGLE_MAX_AREA if single else MAX_AREA
     best: list[np.ndarray] = []
     best_key = (0, 0.0)
+    every: list[np.ndarray] = []  # every variant's boxes
     for close, low, high in VARIANTS:
         boxes = card_shapes(blur, close, low, high, max_area)
+        every += boxes
         if single:
             boxes = sorted(boxes, key=cv2.contourArea)[-1:]
         else:
@@ -84,21 +88,27 @@ def find_outlines(img: np.ndarray, single: bool = False) -> list[np.ndarray]:
         if key > best_key:
             best, best_key = boxes, key
     if not single:
-        best = best + card_sized_rectangles(blur, best)
+        best, seeds = check_card_size(blur, best, every)
+        best = best + card_sized_rectangles(blur, best, seeds)
     return reading_order([box / scale for box in best])[:MAX_CARDS]
 
 
 # The rectangle search (see card_sized_rectangles).
 SEARCH_SCALES = (0.9, 0.95, 1.0, 1.05, 1.1)  # card sizes tried, relative to the cards already found
+SEED_SCALES = (0.88, 0.92, 0.96, 1.0, 1.04, 1.08, 1.12)  # widths and heights tried, relative to seeds
 SIDE_EDGE = 5  # pixels (at DETECT_SIZE): how far an edge may be off a rectangle's side and still back it
 MIN_SIDE = 0.5  # share of every side that must lie on an edge
 MIN_SIDES = 0.7  # share of all four sides, together, that must lie on edges
 MAX_INNER_LINE = 0.85  # an edge running this much of a card's height inside it is another card's side
+# With seeds (see check_card_size): an edge running nearly all the way across a card inside it is
+# the top or bottom of the card above or below. Looser than MAX_INNER_LINE: a card's text box has
+# lines running most of the way across.
+MAX_INNER_ROW = 0.95
 STANDS_OUT = 0.25  # how much more of each side must be edge than of the lines running across the inside
 OVERLAP = 0.3  # a rectangle overlapping a card already found by this share of the smaller is the same card
 
 
-def card_sized_rectangles(gray: np.ndarray, found: list[np.ndarray]) -> list[np.ndarray]:
+def card_sized_rectangles(gray: np.ndarray, found: list[np.ndarray], seeds: list[np.ndarray] = ()) -> list[np.ndarray]:
     """More cards, found as rectangles of the size of those already found.
 
     Outlines break up when a photo is dim or sleeves catch the light, so some
@@ -113,50 +123,25 @@ def card_sized_rectangles(gray: np.ndarray, found: list[np.ndarray]) -> list[np.
 
     Needs two cards found already, to know the size and where the deck lies; a
     rectangle more than a card's size away from every card found is something
-    else in the photo. Cards are taken to be upright.
+    else in the photo. `seeds` (see check_card_size), when given, set the size
+    and count towards where the deck lies instead. Cards are taken to be upright.
     """
-    if len(found) < 2:
+    if seeds:
+        width, height = card_size(seeds)
+    elif len(found) >= 2:
+        width, height = card_size(found)
+    else:
         return []
-    sides = sorted(sorted((np.linalg.norm(b[1] - b[0]), np.linalg.norm(b[2] - b[1]))) for b in found)
-    width, height = float(np.median([s[0] for s in sides])), float(np.median([s[1] for s in sides]))
-
-    edges = cv2.Canny(gray, 30, 100) > 0
-    gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0)
-    gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1)
-    vertical = (edges & (np.abs(gx) > np.abs(gy))).astype(np.uint8)
-    horizontal = (edges & (np.abs(gy) >= np.abs(gx))).astype(np.uint8)
-    vertical = cv2.dilate(vertical, np.ones((1, SIDE_EDGE), np.uint8)).astype(np.float32)
-    horizontal = cv2.dilate(horizontal, np.ones((SIDE_EDGE, 1), np.uint8)).astype(np.float32)
-
+    vertical, horizontal = side_edges(gray)
     candidates = []
-    h, w = gray.shape
-    for size in SEARCH_SCALES:
-        cw, ch = round(width * size), round(height * size)
-        if cw >= w or ch >= h:
-            continue
-        # down[y, x]: share of the column x from row y down ch rows that is edge; across: of the row from x along cw.
-        down = cv2.boxFilter(vertical, -1, (1, ch), anchor=(0, 0), borderType=cv2.BORDER_CONSTANT)
-        across = cv2.boxFilter(horizontal, -1, (cw, 1), anchor=(0, 0), borderType=cv2.BORDER_CONSTANT)
-        ny, nx = h - ch + 1, w - cw + 1  # top-left corners that keep the rectangle in the photo
-        score = np.stack([
-            down[:ny, :nx], down[:ny, cw - 1 : cw - 1 + nx],  # left, right
-            across[:ny, :nx], across[ch - 1 : ch - 1 + ny, :nx],  # top, bottom
-        ])
-        total, weakest = score.mean(axis=0), score.min(axis=0)
-        near = np.ones((max(3, ch // 4) | 1, max(3, cw // 4) | 1), np.uint8)
-        best_nearby = total >= cv2.dilate(total, near)
-        margin_x, margin_y = round(cw * 0.12), round(ch * 0.12)
-        for y, x in zip(*np.nonzero(best_nearby & (weakest >= MIN_SIDE) & (total >= MIN_SIDES))):
-            inside_columns = down[y, x + margin_x : x + cw - margin_x]
-            if inside_columns.max() >= MAX_INNER_LINE:
-                continue  # straddles two cards
-            # A card's sides are lines on a calmer face; on a busy surface (noise, a patterned
-            # mat) edges are everywhere, so any rectangle's sides would score well.
-            inside_rows = across[y + margin_y : y + ch - margin_y, x]
-            left, right, top, bottom = score[:, y, x]
-            if min(left, right) - inside_columns.mean() < STANDS_OUT or min(top, bottom) - inside_rows.mean() < STANDS_OUT:
-                continue
-            candidates.append((float(total[y, x]), (int(x), int(y), cw, ch)))
+    # Seeds come from a photo whose outlines failed: a busy one, often taken at an angle, so
+    # cards' shapes vary across it. Their widths and heights are then tried separately, and
+    # with that much leeway a rectangle can slip half onto the card above or below, so one
+    # with another card's top or bottom running across it is dropped.
+    for across, down in [(a, d) for a in SEED_SCALES for d in SEED_SCALES] if seeds else zip(SEARCH_SCALES, SEARCH_SCALES):
+        candidates += rectangles(
+            vertical, horizontal, round(width * across), round(height * down), MAX_INNER_ROW if seeds else 1.0
+        )
 
     taken = [cv2.boundingRect(b.astype(np.float32)) for b in found]
     candidates.sort(reverse=True)
@@ -164,7 +149,7 @@ def card_sized_rectangles(gray: np.ndarray, found: list[np.ndarray]) -> list[np.
     while True:  # each card added can bring its neighbours within reach
         # The deck lies together, so a card is at most about a card away from the cards found;
         # further out are the photo's other things (a screenshot's buttons and logos).
-        corners = np.concatenate(found + added)
+        corners = np.concatenate(list(found) + list(seeds) + added)
         (left, top), (right, bottom) = corners.min(axis=0) - (width, height), corners.max(axis=0) + (width, height)
         before = len(added)
         for _, (x, y, cw, ch) in candidates:
@@ -176,6 +161,148 @@ def card_sized_rectangles(gray: np.ndarray, found: list[np.ndarray]) -> list[np.
             added.append(np.array([[x, y], [x + cw, y], [x + cw, y + ch], [x, y + ch]], dtype=np.float32))
         if len(added) == before:
             return added
+
+
+def card_size(boxes: list[np.ndarray]) -> tuple[float, float]:
+    """The typical (width, height) of the boxes."""
+    sides = sorted(sorted((np.linalg.norm(b[1] - b[0]), np.linalg.norm(b[2] - b[1]))) for b in boxes)
+    return float(np.median([s[0] for s in sides])), float(np.median([s[1] for s in sides]))
+
+
+def side_edges(gray: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The photo's edges split into those running up and down and those running across,
+    each widened by SIDE_EDGE so a rectangle's side a little off still lands on them."""
+    edges = cv2.Canny(gray, 30, 100) > 0
+    gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0)
+    gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1)
+    vertical = (edges & (np.abs(gx) > np.abs(gy))).astype(np.uint8)
+    horizontal = (edges & (np.abs(gy) >= np.abs(gx))).astype(np.uint8)
+    vertical = cv2.dilate(vertical, np.ones((1, SIDE_EDGE), np.uint8)).astype(np.float32)
+    horizontal = cv2.dilate(horizontal, np.ones((SIDE_EDGE, 1), np.uint8)).astype(np.float32)
+    return vertical, horizontal
+
+
+def rectangles(
+    vertical: np.ndarray, horizontal: np.ndarray, cw: int, ch: int, max_inner_row: float = 1.0
+) -> list[tuple[float, tuple[int, int, int, int]]]:
+    """Every upright cw x ch rectangle whose sides lie on edges (see card_sized_rectangles),
+    as (score, (x, y, w, h)), best in its neighbourhood only. With `max_inner_row`, one with
+    an edge running that share of the way across inside it is dropped too."""
+    h, w = vertical.shape
+    if cw < 3 or ch < 3 or cw >= w or ch >= h:
+        return []
+    # down[y, x]: share of the column x from row y down ch rows that is edge; across: of the row from x along cw.
+    down = cv2.boxFilter(vertical, -1, (1, ch), anchor=(0, 0), borderType=cv2.BORDER_CONSTANT)
+    across = cv2.boxFilter(horizontal, -1, (cw, 1), anchor=(0, 0), borderType=cv2.BORDER_CONSTANT)
+    ny, nx = h - ch + 1, w - cw + 1  # top-left corners that keep the rectangle in the photo
+    score = np.stack([
+        down[:ny, :nx], down[:ny, cw - 1 : cw - 1 + nx],  # left, right
+        across[:ny, :nx], across[ch - 1 : ch - 1 + ny, :nx],  # top, bottom
+    ])
+    total, weakest = score.mean(axis=0), score.min(axis=0)
+    near = np.ones((max(3, ch // 4) | 1, max(3, cw // 4) | 1), np.uint8)
+    best_nearby = total >= cv2.dilate(total, near)
+    margin_x, margin_y = round(cw * 0.12), round(ch * 0.12)
+    found = []
+    for y, x in zip(*np.nonzero(best_nearby & (weakest >= MIN_SIDE) & (total >= MIN_SIDES))):
+        inside_columns = down[y, x + margin_x : x + cw - margin_x]
+        if inside_columns.max() >= MAX_INNER_LINE:
+            continue  # straddles two cards
+        # A card's sides are lines on a calmer face; on a busy surface (noise, a patterned
+        # mat) edges are everywhere, so any rectangle's sides would score well.
+        inside_rows = across[y + margin_y : y + ch - margin_y, x]
+        if inside_rows.max() >= max_inner_row:
+            continue  # straddles two cards, one above the other
+        left, right, top, bottom = score[:, y, x]
+        if min(left, right) - inside_columns.mean() < STANDS_OUT or min(top, bottom) - inside_rows.mean() < STANDS_OUT:
+            continue
+        found.append((float(total[y, x]), (int(x), int(y), cw, ch)))
+    return found
+
+
+def separate_rectangles(candidates: list[tuple[float, tuple[int, int, int, int]]]) -> list[tuple[int, int, int, int]]:
+    """The best-scoring rectangles that don't overlap each other."""
+    kept: list[tuple[int, int, int, int]] = []
+    for _, rect in sorted(candidates, reverse=True):
+        if not any(overlap_share(rect, k) > OVERLAP for k in kept):
+            kept.append(rect)
+    return kept
+
+
+# The size check (see check_card_size).
+SIZE_STEP = 1.05  # card heights tried go up by this much at a time
+SIZE_RANGE = (0.06, 0.95)  # smallest and largest card height tried, as a share of the photo's shorter side
+SIZE_POOL = 0.1  # each height tried also takes in rectangles up to this much smaller or larger
+WRONG_SIZE = 1.6  # the outlines' cards are this many times smaller or larger than the rectangles'...
+MORE_COVERED = 2.0  # ...and the rectangles cover this many times more of the photo: the outlines are wrong
+MIN_SEEDS = 3
+SIZE_CHECK_SIZE = 1200  # photos bigger than this (at DETECT_SIZE, so most) are checked at half size
+SAME_SIZE = 0.12  # an outline this close to the rectangles' size, across and down, is kept
+
+
+def best_height(edges: tuple[np.ndarray, np.ndarray], heights: list[int]) -> tuple[int, list[tuple[int, int, int, int]]]:
+    """Of the card heights, the one whose rectangles (taking in those up to SIZE_POOL smaller or
+    larger) cover the most of the photo, and those rectangles."""
+    by_height = {h: rectangles(*edges, round(h / CARD_RATIO), h) for h in heights}
+    best, seeds, seeds_area = 0, [], 0
+    for height in heights:
+        pool = [c for h in heights if abs(h / height - 1) <= SIZE_POOL for c in by_height[h]]
+        picked = separate_rectangles(pool)
+        if (area := sum(r[2] * r[3] for r in picked)) > seeds_area:
+            best, seeds, seeds_area = height, picked, area
+    return best, seeds
+
+
+def check_card_size(
+    gray: np.ndarray, found: list[np.ndarray], outlines: list[np.ndarray] = ()
+) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    """Checks the cards found by their outlines are the deck's cards, not something else.
+
+    On a busy playmat with shiny cards, the cards' outlines can all break up while
+    the mat's pattern, a logo's letters or a bit of a card's art close into card
+    shapes. Those then set the card size the rectangle search looks for, and it
+    finds more of the same. So the size is also found without the outlines:
+    rectangles are searched for at every card height, and the height whose
+    rectangles cover the most of the photo is taken as the deck's card size.
+
+    If that size is far from the outlines' and its rectangles cover much more of
+    the photo than the outlines and their own rectangle search do, the outlines
+    were wrong. Then the outlines (from any edge setting, `outlines`) of about
+    that size are kept, and the rectangles found at that size are returned as
+    seeds, which give the rectangle search its size and where the deck lies.
+    Otherwise the outlines stand, with no seeds.
+    """
+    # Every height is tried at half size, four times as fast; the best one is then tried again at
+    # full size, for rectangles that sit on the cards as closely as the rectangle search needs.
+    shrink = 2 if max(gray.shape) > SIZE_CHECK_SIZE else 1
+    short = min(gray.shape) / shrink
+    heights = []
+    height = round(short * SIZE_RANGE[0])
+    while height <= short * SIZE_RANGE[1]:
+        heights.append(height)
+        height = round(height * SIZE_STEP) + 1
+    best, seeds = best_height(side_edges(gray[::shrink, ::shrink]), heights)
+    if shrink > 1 and seeds:
+        heights = [round(h * shrink) for h in heights if abs(h / best - 1) <= 2 * SIZE_POOL]
+        _, seeds = best_height(side_edges(gray), heights)
+    seeds_area = sum(r[2] * r[3] for r in seeds)
+    if len(seeds) < max(MIN_SEEDS, len(found)):
+        return found, []  # the outlines account for as many cards
+
+    seed_height = float(np.median([r[3] for r in seeds]))
+    found_height = card_size(found)[1] if found else 0.0
+    if found_height and 1 / WRONG_SIZE < seed_height / found_height < WRONG_SIZE:
+        return found, []  # the same size of card: the outlines are right
+    found_area = sum(cv2.contourArea(b) for b in found + card_sized_rectangles(gray, found))
+    if seeds_area < MORE_COVERED * found_area:
+        return found, []
+    seed_size = np.array([np.median([r[2] for r in seeds]), seed_height])
+    kept: list[np.ndarray] = []
+    for box in drop_nested([b for b in list(outlines) + found if np.all(np.abs(np.array(card_size([b])) / seed_size - 1) <= SAME_SIZE)]):
+        rect = cv2.boundingRect(box.astype(np.float32))
+        if not any(overlap_share(rect, cv2.boundingRect(k.astype(np.float32))) > OVERLAP for k in kept):
+            kept.append(box)
+    return kept, [np.array([[x, y], [x + w, y], [x + w, y + h], [x, y + h]], dtype=np.float32) for x, y, w, h in seeds]
 
 
 def overlap_share(a, b) -> float:
