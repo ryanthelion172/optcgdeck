@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import pytest
 
-from app.detect import CROP_SIZE, BadImage, card_sized_rectangles, find_cards
+from app.detect import CROP_SIZE, BadImage, card_sized_rectangles, check_card_size, find_cards
 
 from .photos import blank_photo, deck_photo, single_card_photo, stack_photo
 
@@ -161,3 +161,40 @@ def test_tiny_photos_are_not_blown_up_past_their_edges():
     img = cv2.imdecode(np.frombuffer(deck_photo(8), np.uint8), cv2.IMREAD_COLOR)
     tiny = cv2.resize(img, (200, 150), interpolation=cv2.INTER_AREA)
     assert len(find_cards(cv2.imencode(".png", tiny)[1].tobytes())) == 8
+
+
+def broken_outline_cards(tops, cw=150, ch=210, size=(900, 1200)) -> np.ndarray:
+    """Cards whose corners are washed out, so no outline closes, as a blurred grey photo."""
+    gray = np.full(size, 60, np.uint8)
+    for x, y in tops:
+        cv2.rectangle(gray, (x, y), (x + cw, y + ch), 200, -1)
+        for cx, cy in [(x, y), (x + cw, y), (x, y + ch), (x + cw, y + ch)]:
+            cv2.circle(gray, (cx, cy), 18, 60, -1)
+    return cv2.GaussianBlur(gray, (5, 5), 0)
+
+
+def box(x, y, w, h) -> np.ndarray:
+    return np.array([[x, y], [x + w, y], [x + w, y + h], [x, y + h]], np.float32)
+
+
+def test_size_check_replaces_outlines_that_are_not_the_decks_cards():
+    """On a busy mat the only outlines that close can be small bits of pattern or art.
+    Their size mustn't become the card size the rectangle search looks for."""
+    tops = [(80 + c * 220, 80 + r * 300) for r in range(2) for c in range(4)]
+    gray = broken_outline_cards(tops)
+    junk = [box(1000, 700 + i * 60, 30, 42) for i in range(3)]  # card-shaped, but a fifth of a card
+    kept, seeds = check_card_size(gray, junk)
+    assert kept == []
+    assert len(seeds) >= 3
+    assert np.median([b[2][1] - b[0][1] for b in seeds]) == pytest.approx(210, rel=0.12)
+    added = sorted(b.min(axis=0).tolist() for b in card_sized_rectangles(gray, kept, seeds))
+    assert len(added) == len(tops)
+    assert np.abs(np.array(added) - sorted(tops)).max() <= 6
+
+
+def test_size_check_keeps_outlines_of_the_right_size():
+    tops = [(80 + c * 220, 80 + r * 300) for r in range(2) for c in range(4)]
+    gray = broken_outline_cards(tops)
+    found = [box(x, y, 150, 210) for x, y in tops[:2]]
+    kept, seeds = check_card_size(gray, found)
+    assert kept is found and seeds == []
